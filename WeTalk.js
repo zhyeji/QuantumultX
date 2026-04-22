@@ -4,10 +4,10 @@
 @Author：TG@ZenMoFiShi
 
 [rewrite_local]
-^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header WeTalk.js
+^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js
 
 [task_local]
-1 * * * * WeTalk.js, tag=WeTalk签到, enabled=true
+1 * * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js, tag=WeTalk签到, img-url=https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.png, enabled=true
 
 [MITM]
 hostname = api.wetalkapp.com
