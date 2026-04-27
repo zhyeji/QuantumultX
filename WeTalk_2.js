@@ -7,7 +7,7 @@
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js
 
 [task_local]
-* * * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js, tag=WeTalk签到, enabled=true
+3 8-15 * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js, tag=WeTalk签到, enabled=true
 
 [MITM]
 hostname = api.wetalkapp.com
@@ -15,6 +15,7 @@ hostname = api.wetalkapp.com
 
 const scriptName = 'WeTalk';
 const storeKey = 'wetalk_accounts_v1';
+const statKey = 'wetalk_daily_stat';
 const SECRET = '0fOiukQq7jXZV2GRi9LGlO';
 const API_HOST = 'api.wetalkapp.com';
 const MAX_VIDEO = 5;
@@ -26,6 +27,66 @@ const IOS_SCALES = ['2.00','3.00','3.00','2.00','3.00'];
 const IPHONE_MODELS = ['iPhone14,3','iPhone13,3','iPhone15,3','iPhone16,1','iPhone14,7','iPhone13,2','iPhone15,2','iPhone12,1'];
 const CFN_VERS = ['1410.0.3','1494.0.7','1568.100.1','1209.1','1474.0.4','1568.200.2'];
 const DARWIN_VERS = ['22.6.0','23.5.0','23.6.0','24.0.0','22.4.0'];
+
+// 获取今日日期 YYYY-MM-DD
+function getTodayDateStr() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '');
+  const day = String(d.getDate()).padStart(2, '');
+  return `${y}-${m}-${day}`;
+}
+
+// 读取每日统计
+function getDailyStat() {
+  const today = getTodayDateStr();
+  let raw = $prefs.valueForKey(statKey);
+  let stat = {};
+  try {
+    if(raw) stat = JSON.parse(raw);
+  } catch(e) { stat = {}; }
+  // 日期不一致则清空重置
+  if(stat.date !== today) {
+    stat = { date: today, signMap: {}, videoMap: {} };
+    saveDailyStat(stat);
+  }
+  return stat;
+}
+
+// 保存每日统计
+function saveDailyStat(stat) {
+  $prefs.setValueForKey(JSON.stringify(stat), statKey);
+}
+
+// 账号签到计数+1
+function addSignCount(accId) {
+  let stat = getDailyStat();
+  if(!stat.signMap[accId]) stat.signMap[accId] = 0;
+  stat.signMap[accId] += 1;
+  saveDailyStat(stat);
+  return stat.signMap[accId];
+}
+
+// 账号视频计数+1
+function addVideoCount(accId) {
+  let stat = getDailyStat();
+  if(!stat.videoMap[accId]) stat.videoMap[accId] = 0;
+  stat.videoMap[accId] += 1;
+  saveDailyStat(stat);
+  return stat.videoMap[accId];
+}
+
+// 获取账号今日累计签到次数
+function getSignCount(accId) {
+  let stat = getDailyStat();
+  return stat.signMap[accId] || 0;
+}
+
+// 获取账号今日累计观看次数
+function getVideoCount(accId) {
+  let stat = getDailyStat();
+  return stat.videoMap[accId] || 0;
+}
 
 function MD5(string) {
   function RotateLeft(lValue, iShiftBits) { return (lValue << iShiftBits) | (lValue >>> (32 - iShiftBits)); }
@@ -215,12 +276,11 @@ function sleep(ms) {
 }
 
 function runAccount(acc, index, total) {
+  const accId = acc.id;
   const ua = buildUA(acc.baseUA, acc.uaSeed);
   const headers = buildHeaders(acc.capture, ua);
   let initBalance = '';
   let lastBalance = '';
-  let signCount = 0;
-  let videoTotal = 0;
 
   function fetchApi(path) {
     return $task.fetch({ url: buildUrl(path, acc.capture), method: 'GET', headers });
@@ -236,7 +296,9 @@ function runAccount(acc, index, total) {
           fetchApi('videoBonus').then(res => {
             try {
               const d = JSON.parse(res.body);
-              if (d.retcode === 0) videoTotal++;
+              if (d.retcode === 0) {
+                addVideoCount(accId);
+              }
             } catch (e) {}
             resolve(next());
           }).catch(() => resolve());
@@ -255,7 +317,9 @@ function runAccount(acc, index, total) {
   }).then(res => {
     try {
       const d = JSON.parse(res.body);
-      if (d.retcode === 0) signCount = 1;
+      if (d.retcode === 0) {
+        addSignCount(accId);
+      }
     } catch (e) {}
     return doVideoLoop(MAX_VIDEO);
   }).then(() => fetchApi('queryBalanceAndBonus')).then(res => {
@@ -263,9 +327,12 @@ function runAccount(acc, index, total) {
       const d = JSON.parse(res.body);
       if (d.retcode === 0) lastBalance = d.result.balance;
     } catch (e) {}
-    // 严格对齐格式
+    // 读取今日累计数据
+    const totalSign = getSignCount(accId);
+    const totalVideo = getVideoCount(accId);
+    // 固定对齐格式
     let line1 = `初始金币：${initBalance} ；最新金币：${lastBalance}`;
-    let line2 = `今日签到：${signCount} 次 ；今日观看：${videoTotal} 条`;
+    let line2 = `今日签到：${totalSign} 次 ；今日观看：${totalVideo} 条`;
     return line1 + '\n' + line2;
   }).catch(err => {
     return `任务异常：${err.error || String(err)}`;
