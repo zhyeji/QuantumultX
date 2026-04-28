@@ -1,13 +1,12 @@
 //2026/04/21
 /*
-@Name：WeTalk 自动化签到+视频奖励（最终稳定版）
-@Author：优化整合版
+@Name：WeTalk 自动化签到+视频奖励（最终对齐版）
 
 [rewrite_local]
-^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js
+^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js
 
 [task_local]
-0 9 * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js, tag=WeTalk签到, enabled=true
+0 9 * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js, tag=WeTalk签到, enabled=true
 
 [MITM]
 hostname = api.wetalkapp.com
@@ -21,20 +20,13 @@ const SECRET = '0fOiukQq7jXZV2GRi9LGlO';
 const API_HOST = 'api.wetalkapp.com';
 const MAX_VIDEO = 5;
 const VIDEO_DELAY = 8000;
-const ACCOUNT_GAP = 3500;
 
-/* ===== MD5（完整原版）===== */
+/* ===== MD5 ===== */
 function MD5(string){
   function RotateLeft(lValue,iShiftBits){return(lValue<<iShiftBits)|(lValue>>>(32-iShiftBits));}
   function AddUnsigned(lX,lY){const lX4=lX&0x40000000,lY4=lY&0x40000000,lX8=lX&0x80000000,lY8=lY&0x80000000;const lResult=(lX&0x3FFFFFFF)+(lY&0x3FFFFFFF);if(lX4&lY4)return lResult^0x80000000^lX8^lY8;if(lX4|lY4){if(lResult&0x40000000)return lResult^0xC0000000^lX8^lY8;else return lResult^0x40000000^lX8^lY8;}else return lResult^lX8^lY8;}
   function F(x,y,z){return(x&y)|((~x)&z);}
-  function G(x,y,z){return(x&z)|(y&(~z));}
-  function H(x,y,z){return x^y^z;}
-  function I(x,y,z){return y^(x|(~z));}
   function FF(a,b,c,d,x,s,ac){a=AddUnsigned(a,AddUnsigned(AddUnsigned(F(b,c,d),x),ac));return AddUnsigned(RotateLeft(a,s),b);}
-  function GG(a,b,c,d,x,s,ac){a=AddUnsigned(a,AddUnsigned(AddUnsigned(G(b,c,d),x),ac));return AddUnsigned(RotateLeft(a,s),b);}
-  function HH(a,b,c,d,x,s,ac){a=AddUnsigned(a,AddUnsigned(AddUnsigned(H(b,c,d),x),ac));return AddUnsigned(RotateLeft(a,s),b);}
-  function II(a,b,c,d,x,s,ac){a=AddUnsigned(a,AddUnsigned(AddUnsigned(I(b,c,d),x),ac));return AddUnsigned(RotateLeft(a,s),b);}
   function ConvertToWordArray(str){
     const lMessageLength=str.length;
     const lNumberOfWords_temp1=lMessageLength+8;
@@ -67,14 +59,11 @@ function MD5(string){
   const x=ConvertToWordArray(string);
   let a=0x67452301,b=0xEFCDAB89,c=0x98BADCFE,d=0x10325476;
   for(let k=0;k<x.length;k+=16){
-    const AA=a,BB=b,CC=c,DD=d;
+    const AA=a;
     a=FF(a,b,c,d,x[k+0],7,0xD76AA478);
-    d=FF(d,a,b,c,x[k+1],12,0xE8C7B756);
-    c=FF(c,d,a,b,x[k+2],17,0x242070DB);
-    b=FF(b,c,d,a,x[k+3],22,0xC1BDCEEE);
-    a=AddUnsigned(a,AA);b=AddUnsigned(b,BB);c=AddUnsigned(c,CC);d=AddUnsigned(d,DD);
+    a=AddUnsigned(a,AA);
   }
-  return (WordToHex(a)+WordToHex(b)+WordToHex(c)+WordToHex(d)).toLowerCase();
+  return WordToHex(a);
 }
 
 /* ===== 工具 ===== */
@@ -104,7 +93,7 @@ function buildUrl(path,capture){
 }
 
 /* ===== 核心 ===== */
-function runAccount(acc,i,total){
+function runAccount(acc){
   const stats=loadStats();
   const today=getLocalDate();
   if(!stats[acc.id])stats[acc.id]={};
@@ -155,7 +144,6 @@ function runAccount(acc,i,total){
   .then(()=>fetchApi('queryBalanceAndBonus'))
   .then(r=>{try{fin=Number(JSON.parse(r.body).result.balance||0);}catch{}})
   .then(()=>({
-    tag:`[账号${i+1}/${total} ${acc.alias||acc.id}]`,
     initial:init.toFixed(2),
     final:fin.toFixed(2),
     checkin:`${stats[acc.id][today].checkin} 次`,
@@ -167,18 +155,23 @@ function runAccount(acc,i,total){
 const store=loadStore();
 const ids=store.order||[];
 
-Promise.all(ids.map((id,i)=>runAccount(store.accounts[id],i,ids.length)))
+Promise.all(ids.map(id=>runAccount(store.accounts[id])))
 .then(res=>{
-  const pad=(s,l)=>' '.repeat(l-s.length)+s;
-  const maxI=Math.max(...res.map(r=>r.initial.length));
-  const maxF=Math.max(...res.map(r=>r.final.length));
-  const maxC=Math.max(...res.map(r=>r.checkin.length));
-  const maxV=Math.max(...res.map(r=>r.video.length));
+  function padRight(str,len){return str+' '.repeat(len-str.length);}
 
-  const text=res.map(r=>[
-    r.tag,
-    `初始金币：${pad(r.initial,maxI)}；最新金币：${pad(r.final,maxF)}`,
-    `今日签到：${pad(r.checkin,maxC)}；今日观看：${pad(r.video,maxV)}`
+  const l1=res.map(r=>`初始金币：${r.initial}`);
+  const r1=res.map(r=>`最新金币：${r.final}`);
+  const l2=res.map(r=>`今日签到：${r.checkin}`);
+  const r2=res.map(r=>`今日观看：${r.video}`);
+
+  const maxL1=Math.max(...l1.map(s=>s.length));
+  const maxR1=Math.max(...r1.map(s=>s.length));
+  const maxL2=Math.max(...l2.map(s=>s.length));
+  const maxR2=Math.max(...r2.map(s=>s.length));
+
+  const text=res.map((_,i)=>[
+    `${padRight(l1[i],maxL1)}；${padRight(r1[i],maxR1)}`,
+    `${padRight(l2[i],maxL2)}；${padRight(r2[i],maxR2)}`
   ].join('\n')).join('\n\n———\n\n');
 
   $notify(scriptName,`全部完成 (${res.length}个账号)`,text);
