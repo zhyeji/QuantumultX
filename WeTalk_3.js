@@ -1,4 +1,3 @@
-```javascript
 /*
 @Name：WeTalk 自动化签到+视频奖励
 @Author：TG@ZenMoFiShi
@@ -420,4 +419,3 @@ if (typeof $request !== 'undefined' && $request) {
     });
   }
 }
-```
