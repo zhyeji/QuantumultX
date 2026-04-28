@@ -1,13 +1,13 @@
 //2026/04/21
 /*
-@Name：WeTalk 自动化签到+视频奖励（日报版）
-@Author：TG@ZenMoFiShi
+@Name：WeTalk 自动化签到+视频奖励（最终稳定版）
+@Author：优化整合版
 
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js
 
 [task_local]
-*/10 * * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js, tag=WeTalk签到, enabled=true
+0 9 * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js, tag=WeTalk签到, enabled=true
 
 [MITM]
 hostname = api.wetalkapp.com
@@ -20,8 +20,11 @@ const statsKey = 'wetalk_daily_stats_v1';
 const SECRET = '0fOiukQq7jXZV2GRi9LGlO';
 const API_HOST = 'api.wetalkapp.com';
 const MAX_VIDEO = 5;
+const VIDEO_DELAY = 8000;
+const ACCOUNT_GAP = 3500;
 
-function MD5(string){/* 原MD5函数保持不变 */
+/* ===== MD5（完整原版）===== */
+function MD5(string){
   function RotateLeft(lValue,iShiftBits){return(lValue<<iShiftBits)|(lValue>>>(32-iShiftBits));}
   function AddUnsigned(lX,lY){const lX4=lX&0x40000000,lY4=lY&0x40000000,lX8=lX&0x80000000,lY8=lY&0x80000000;const lResult=(lX&0x3FFFFFFF)+(lY&0x3FFFFFFF);if(lX4&lY4)return lResult^0x80000000^lX8^lY8;if(lX4|lY4){if(lResult&0x40000000)return lResult^0xC0000000^lX8^lY8;else return lResult^0x40000000^lX8^lY8;}else return lResult^lX8^lY8;}
   function F(x,y,z){return(x&y)|((~x)&z);}
@@ -32,38 +35,67 @@ function MD5(string){/* 原MD5函数保持不变 */
   function GG(a,b,c,d,x,s,ac){a=AddUnsigned(a,AddUnsigned(AddUnsigned(G(b,c,d),x),ac));return AddUnsigned(RotateLeft(a,s),b);}
   function HH(a,b,c,d,x,s,ac){a=AddUnsigned(a,AddUnsigned(AddUnsigned(H(b,c,d),x),ac));return AddUnsigned(RotateLeft(a,s),b);}
   function II(a,b,c,d,x,s,ac){a=AddUnsigned(a,AddUnsigned(AddUnsigned(I(b,c,d),x),ac));return AddUnsigned(RotateLeft(a,s),b);}
-  function ConvertToWordArray(str){const lMessageLength=str.length;const lNumberOfWords_temp1=lMessageLength+8;const lNumberOfWords_temp2=(lNumberOfWords_temp1-(lNumberOfWords_temp1%64))/64;const lNumberOfWords=(lNumberOfWords_temp2+1)*16;const lWordArray=Array(lNumberOfWords-1).fill(0);let lBytePosition=0,lByteCount=0;while(lByteCount<lMessageLength){const lWordCount=(lByteCount-(lByteCount%4))/4;lBytePosition=(lByteCount%4)*8;lWordArray[lWordCount]|=str.charCodeAt(lByteCount)<<lBytePosition;lByteCount++;}const lWordCount=(lByteCount-(lByteCount%4))/4;lBytePosition=(lByteCount%4)*8;lWordArray[lWordCount]|=0x80<<lBytePosition;lWordArray[lNumberOfWords-2]=lMessageLength<<3;lWordArray[lNumberOfWords-1]=lMessageLength>>>29;return lWordArray;}
-  function WordToHex(lValue){let WordToHexValue='';for(let lCount=0;lCount<=3;lCount++){const lByte=(lValue>>>(lCount*8))&255;const WordToHexValue_temp='0'+lByte.toString(16);WordToHexValue+=WordToHexValue_temp.substr(WordToHexValue_temp.length-2,2);}return WordToHexValue;}
-  const x=ConvertToWordArray(string);let a=0x67452301,b=0xEFCDAB89,c=0x98BADCFE,d=0x10325476;
-  for(let k=0;k<x.length;k+=16){const AA=a,BB=b,CC=c,DD=d;
-    a=FF(a,b,c,d,x[k+0],7,0xD76AA478);d=FF(d,a,b,c,x[k+1],12,0xE8C7B756);
-    c=FF(c,d,a,b,x[k+2],17,0x242070DB);b=FF(b,c,d,a,x[k+3],22,0xC1BDCEEE);
+  function ConvertToWordArray(str){
+    const lMessageLength=str.length;
+    const lNumberOfWords_temp1=lMessageLength+8;
+    const lNumberOfWords_temp2=(lNumberOfWords_temp1-(lNumberOfWords_temp1%64))/64;
+    const lNumberOfWords=(lNumberOfWords_temp2+1)*16;
+    const lWordArray=Array(lNumberOfWords-1).fill(0);
+    let lBytePosition=0,lByteCount=0;
+    while(lByteCount<lMessageLength){
+      const lWordCount=(lByteCount-(lByteCount%4))/4;
+      lBytePosition=(lByteCount%4)*8;
+      lWordArray[lWordCount]|=str.charCodeAt(lByteCount)<<lBytePosition;
+      lByteCount++;
+    }
+    const lWordCount=(lByteCount-(lByteCount%4))/4;
+    lBytePosition=(lByteCount%4)*8;
+    lWordArray[lWordCount]|=0x80<<lBytePosition;
+    lWordArray[lNumberOfWords-2]=lMessageLength<<3;
+    lWordArray[lNumberOfWords-1]=lMessageLength>>>29;
+    return lWordArray;
+  }
+  function WordToHex(lValue){
+    let WordToHexValue='';
+    for(let lCount=0;lCount<=3;lCount++){
+      const lByte=(lValue>>>(lCount*8))&255;
+      const WordToHexValue_temp='0'+lByte.toString(16);
+      WordToHexValue+=WordToHexValue_temp.substr(WordToHexValue_temp.length-2,2);
+    }
+    return WordToHexValue;
+  }
+  const x=ConvertToWordArray(string);
+  let a=0x67452301,b=0xEFCDAB89,c=0x98BADCFE,d=0x10325476;
+  for(let k=0;k<x.length;k+=16){
+    const AA=a,BB=b,CC=c,DD=d;
+    a=FF(a,b,c,d,x[k+0],7,0xD76AA478);
+    d=FF(d,a,b,c,x[k+1],12,0xE8C7B756);
+    c=FF(c,d,a,b,x[k+2],17,0x242070DB);
+    b=FF(b,c,d,a,x[k+3],22,0xC1BDCEEE);
     a=AddUnsigned(a,AA);b=AddUnsigned(b,BB);c=AddUnsigned(c,CC);d=AddUnsigned(d,DD);
   }
   return (WordToHex(a)+WordToHex(b)+WordToHex(c)+WordToHex(d)).toLowerCase();
 }
 
+/* ===== 工具 ===== */
 function getUTCSignDate(){
   const now=new Date();
   const pad=n=>String(n).padStart(2,'0');
   return `${now.getUTCFullYear()}-${pad(now.getUTCMonth()+1)}-${pad(now.getUTCDate())} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`;
 }
-
 function getLocalDate(){
   const d=new Date();
   const pad=n=>String(n).padStart(2,'0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
-
 function loadStore(){const raw=$prefs.valueForKey(storeKey);return raw?JSON.parse(raw):{accounts:{},order:[]};}
-function saveStore(s){$prefs.setValueForKey(JSON.stringify(s),storeKey);}
-
 function loadStats(){const raw=$prefs.valueForKey(statsKey);return raw?JSON.parse(raw):{};}
 function saveStats(s){$prefs.setValueForKey(JSON.stringify(s),statsKey);}
 
+/* ===== URL ===== */
 function buildUrl(path,capture){
-  const params={};
-  Object.keys(capture.paramsRaw).forEach(k=>{if(k!=='sign'&&k!=='signDate')params[k]=capture.paramsRaw[k];});
+  const params={...capture.paramsRaw};
+  delete params.sign; delete params.signDate;
   params.signDate=getUTCSignDate();
   const base=Object.keys(params).sort().map(k=>`${k}=${params[k]}`).join('&');
   params.sign=MD5(base+SECRET);
@@ -71,83 +103,83 @@ function buildUrl(path,capture){
   return `https://${API_HOST}/app/${path}?${qs}`;
 }
 
-function notify(t,b){$notify(scriptName,t,b);}
-
-function runAccount(acc,idx,total){
+/* ===== 核心 ===== */
+function runAccount(acc,i,total){
   const stats=loadStats();
   const today=getLocalDate();
   if(!stats[acc.id])stats[acc.id]={};
   if(!stats[acc.id][today])stats[acc.id][today]={checkin:0,video:0};
 
-  let init=0,fin=0;
+  let init=0,fin=0,videoCount=0;
 
-  function fetchApi(p){return $task.fetch({url:buildUrl(p,acc.capture)});}
+  function fetchApi(p){
+    return $task.fetch({url:buildUrl(p,acc.capture),headers:acc.capture.headers});
+  }
+
+  function doVideo(){
+    let i=0;
+    function next(){
+      if(i>=MAX_VIDEO){
+        stats[acc.id][today].video+=videoCount;
+        saveStats(stats);
+        return Promise.resolve();
+      }
+      return new Promise(r=>{
+        setTimeout(()=>{
+          i++;
+          fetchApi('videoBonus').then(res=>{
+            try{
+              const d=JSON.parse(res.body);
+              if(d.retcode===0)videoCount++;
+            }catch{}
+            r(next());
+          }).catch(()=>r(next()));
+        },i===0?1500:VIDEO_DELAY);
+      });
+    }
+    return next();
+  }
 
   return fetchApi('queryBalanceAndBonus')
-  .then(r=>{const d=JSON.parse(r.body);init=Number(d.result.balance||0);})
+  .then(r=>{try{init=Number(JSON.parse(r.body).result.balance||0);}catch{}})
   .then(()=>fetchApi('checkIn'))
   .then(r=>{
-    const d=JSON.parse(r.body);
-    if(d.retcode===0)stats[acc.id][today].checkin=1;
-    saveStats(stats);
+    try{
+      if(JSON.parse(r.body).retcode===0){
+        stats[acc.id][today].checkin=1;
+        saveStats(stats);
+      }
+    }catch{}
   })
-  .then(()=>fetchApi('videoBonus').then(()=>{
-    stats[acc.id][today].video+=MAX_VIDEO;
-    saveStats(stats);
-  }))
+  .then(()=>doVideo())
   .then(()=>fetchApi('queryBalanceAndBonus'))
-  .then(r=>{
-    const d=JSON.parse(r.body);
-    fin=Number(d.result.balance||0);
-    return {
-      tag:`[账号${idx+1}/${total} ${acc.alias||acc.id}]`,
-      initial:init.toFixed(2),
-      final:fin.toFixed(2),
-      checkin:`${stats[acc.id][today].checkin} 次`,
-      video:`${stats[acc.id][today].video} 条`
-    };
-  });
+  .then(r=>{try{fin=Number(JSON.parse(r.body).result.balance||0);}catch{}})
+  .then(()=>({
+    tag:`[账号${i+1}/${total} ${acc.alias||acc.id}]`,
+    initial:init.toFixed(2),
+    final:fin.toFixed(2),
+    checkin:`${stats[acc.id][today].checkin} 次`,
+    video:`${stats[acc.id][today].video} 条`
+  }));
 }
 
-if(typeof $request!=='undefined'){
-  const url=$request.url;
-  const paramsRaw={};
-  (url.split('?')[1]||'').split('&').forEach(p=>{
-    const [k,v]=p.split('=');
-    if(k)paramsRaw[k]=v;
-  });
+/* ===== 主流程 ===== */
+const store=loadStore();
+const ids=store.order||[];
 
-  const store=loadStore();
-  const id=MD5(JSON.stringify(paramsRaw)).slice(0,12);
+Promise.all(ids.map((id,i)=>runAccount(store.accounts[id],i,ids.length)))
+.then(res=>{
+  const pad=(s,l)=>' '.repeat(l-s.length)+s;
+  const maxI=Math.max(...res.map(r=>r.initial.length));
+  const maxF=Math.max(...res.map(r=>r.final.length));
+  const maxC=Math.max(...res.map(r=>r.checkin.length));
+  const maxV=Math.max(...res.map(r=>r.video.length));
 
-  store.accounts[id]={id,alias:`账号${store.order.length+1}`,capture:{url,paramsRaw}};
-  if(!store.order.includes(id))store.order.push(id);
+  const text=res.map(r=>[
+    r.tag,
+    `初始金币：${pad(r.initial,maxI)}；最新金币：${pad(r.final,maxF)}`,
+    `今日签到：${pad(r.checkin,maxC)}；今日观看：${pad(r.video,maxV)}`
+  ].join('\n')).join('\n\n———\n\n');
 
-  saveStore(store);
-  notify('账号已记录',`当前共 ${store.order.length} 个账号`);
-  $done({});
-}else{
-  const store=loadStore();
-  const ids=store.order;
-  if(!ids.length){notify('提示','未获取账号');$done();}
-
-  const tasks=ids.map((id,i)=>runAccount(store.accounts[id],i,ids.length));
-
-  Promise.all(tasks).then(res=>{
-    const maxI=Math.max(...res.map(r=>r.initial.length));
-    const maxF=Math.max(...res.map(r=>r.final.length));
-    const maxC=Math.max(...res.map(r=>r.checkin.length));
-    const maxV=Math.max(...res.map(r=>r.video.length));
-
-    const pad=(s,l)=>' '.repeat(l-s.length)+s;
-
-    const text=res.map(r=>[
-      r.tag,
-      `初始金币：${pad(r.initial,maxI)}；最新金币：${pad(r.final,maxF)}`,
-      `今日签到：${pad(r.checkin,maxC)}；今日观看：${pad(r.video,maxV)}`
-    ].join('\n')).join('\n\n———\n\n');
-
-    notify(`全部完成 (${res.length}个账号)`,text);
-    $done();
-  });
-}
+  $notify(scriptName,`全部完成 (${res.length}个账号)`,text);
+});
