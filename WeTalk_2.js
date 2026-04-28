@@ -1,7 +1,7 @@
 /*
 @Name：WeTalk 自动化签到+视频奖励
 @Author：TG@ZenMoFiShi
-@Desc：自动签到+领视频奖励，累计当日数据，格式化输出
+@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容版)
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js
 [task_local]
@@ -25,14 +25,12 @@ var CFN_VERS = ['1410.0.3','1494.0.7','1568.100.1','1209.1','1474.0.4','1568.200
 var DARWIN_VERS = ['22.6.0','23.5.0','23.6.0','24.0.0','22.4.0'];
 
 // ==================== ES5 补丁 ====================
-// padStart polyfill
 function padStart(str, len, pad) {
   str = String(str);
   while (str.length < len) str = pad + str;
   return str;
 }
 
-// Array fill polyfill
 function arrayFill(size, value) {
   var arr = [];
   for (var i = 0; i < size; i++) arr.push(value);
@@ -62,7 +60,7 @@ function MD5(string) {
     var lNumberOfWords_temp1 = lMessageLength + 8;
     var lNumberOfWords_temp2 = (lNumberOfWords_temp1 - (lNumberOfWords_temp1 % 64)) / 64;
     var lNumberOfWords = (lNumberOfWords_temp2 + 1) * 16;
-    var lWordArray = arrayFill(lNumberOfWords, 0);          // 用 polyfill 替换 fill
+    var lWordArray = arrayFill(lNumberOfWords, 0);
     var lBytePosition = 0, lByteCount = 0;
     while (lByteCount < lMessageLength) {
       var lWordCount = (lByteCount - (lByteCount % 4)) / 4;
@@ -116,7 +114,7 @@ function MD5(string) {
 // ==================== 工具函数 ====================
 function getUTCSignDate() {
   var now = new Date();
-  var pad = function(n) { return padStart(String(n), 2, '0'); };  // 用 polyfill
+  var pad = function(n) { return padStart(String(n), 2, '0'); };
   return now.getUTCFullYear() + '-' + pad(now.getUTCMonth()+1) + '-' + pad(now.getUTCDate()) + ' ' +
          pad(now.getUTCHours()) + ':' + pad(now.getUTCMinutes()) + ':' + pad(now.getUTCSeconds());
 }
@@ -148,13 +146,19 @@ function parseRawQuery(url) {
   return rawMap;
 }
 
+// 去掉 .filter() 的 fingerprintOf
 function fingerprintOf(paramsRaw) {
   var drop = { sign:1, signDate:1, timestamp:1, ts:1, nonce:1, random:1, reqTime:1, reqId:1, requestId:1 };
-  var keys = Object.keys(paramsRaw || {}).filter(function(k) { return !drop[k]; }).sort();
-  var base = '';
+  var keys = Object.keys(paramsRaw || {});
+  var keep = [];
   for (var i = 0; i < keys.length; i++) {
+    if (!drop[keys[i]]) keep.push(keys[i]);
+  }
+  keep.sort();
+  var base = '';
+  for (var i = 0; i < keep.length; i++) {
     if (i > 0) base += '&';
-    base += keys[i] + '=' + paramsRaw[keys[i]];
+    base += keep[i] + '=' + paramsRaw[keep[i]];
   }
   return MD5(base).slice(0, 12);
 }
@@ -249,7 +253,6 @@ function buildHeaders(capture, ua) {
   delete headers[':authority']; delete headers[':method']; delete headers[':path']; delete headers[':scheme'];
   headers['Host'] = API_HOST;
   headers['Accept'] = headers['Accept'] || 'application/json';
-  // 强制替换 User-Agent
   var headerKeys = Object.keys(headers);
   for (var i = 0; i < headerKeys.length; i++) {
     if (headerKeys[i].toLowerCase() === 'user-agent') delete headers[headerKeys[i]];
@@ -269,7 +272,6 @@ function sleep(ms) {
 
 // ==================== 单账号执行（核心） ====================
 function runAccount(acc, store) {
-  // 日期
   var now = new Date();
   var today = now.getFullYear() + '/' + (now.getMonth() + 1) + '/' + now.getDate();
   var stats = store.dailyStats[acc.id];
@@ -284,51 +286,67 @@ function runAccount(acc, store) {
     return $task.fetch({ url: buildUrl(path, acc.capture), method: 'GET', headers: headers });
   }
 
-  // 查初始余额
-  return fetchApi('queryBalanceAndBonus').then(function(res) {
+  function parseBody(res) {
     try {
-      var d = JSON.parse(res.body);
-      if (d.retcode === 0) {
-        var bal = Number(d.result.balance);
-        if (stats.initialBalance === null) stats.initialBalance = bal;
-      }
-    } catch (e) {}
+      return JSON.parse(res.body);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // 1. 查初始余额
+  return fetchApi('queryBalanceAndBonus').then(function(res) {
+    var d = parseBody(res);
+    if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
+      stats.initialBalance = Number(d.result.balance);
+    }
     return fetchApi('checkIn');
   }).then(function(res) {
-    try {
-      var d = JSON.parse(res.body);
-      if (d.retcode === 0) stats.checkInCount++;
-    } catch (e) {}
-    // 领视频奖励
+    var d = parseBody(res);
+    if (d && d.retcode === 0) {
+      var hasReward = d.result && (d.result.bonus !== undefined || d.result.bonusHint !== undefined);
+      var msg = d.retmsg || '';
+      var isNewCheckIn = msg.indexOf('已经签过') === -1 && msg.indexOf('明天再试') === -1;
+      if (hasReward || isNewCheckIn) {
+        stats.checkInCount++;
+      }
+    }
+    // 2. 领视频奖励
     var p = Promise.resolve();
     for (var i = 0; i < MAX_VIDEO; i++) {
-      p = p.then(function(videoIdx) {
-        return new Promise(function(resolve) {
-          setTimeout(function() {
-            resolve(fetchApi('videoBonus').then(function(res) {
-              try {
-                var d = JSON.parse(res.body);
-                if (d.retcode === 0) stats.videoCount++;
-              } catch (e) {}
-            }));
-          }, videoIdx === 0 ? 1500 : VIDEO_DELAY);
-        }).bind(null, i); // 注意：需要正确传递 i
-      }(i));
+      (function(idx) {
+        p = p.then(function() {
+          return new Promise(function(resolve) {
+            setTimeout(function() {
+              resolve(fetchApi('videoBonus').then(function(res) {
+                var d = parseBody(res);
+                if (d && d.retcode === 0) {
+                  var hasBonus = d.result && d.result.bonus !== undefined && Number(d.result.bonus) > 0;
+                  var msg = d.retmsg || '';
+                  var notLimited = msg.indexOf('次数过多') === -1 && msg.indexOf('明天再试') === -1;
+                  if (hasBonus && notLimited) {
+                    stats.videoCount++;
+                  }
+                }
+              }));
+            }, idx === 0 ? 1500 : VIDEO_DELAY);
+          });
+        });
+      })(i);
     }
     return p;
   }).then(function() {
     return fetchApi('queryBalanceAndBonus');
   }).then(function(res) {
     var finalBalance = '--';
-    try {
-      var d = JSON.parse(res.body);
-      if (d.retcode === 0) finalBalance = Number(d.result.balance);
-    } catch (e) {}
+    var d = parseBody(res);
+    if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
+      finalBalance = Number(d.result.balance);
+    }
     var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(2) : '--';
     var fin = finalBalance !== '--' ? finalBalance.toFixed(2) : '--';
     var line1 = '初始金币: ' + ini + ' ; 最新金币: ' + fin;
     var line2 = '今日签到: ' + stats.checkInCount + ' 次    ; 今日观看: ' + stats.videoCount + ' 条';
-    // 保存统计
     store.dailyStats[acc.id] = stats;
     saveStore(store);
     return line1 + '\n' + line2;
@@ -376,9 +394,14 @@ if (typeof $request !== 'undefined' && $request) {
   notify(existed ? '账号参数已更新' : '新账号已入库', alias + '（id:' + fp + '）\n当前账号总数：' + total);
   $done({});
 } else {
-  // 定时任务模式
+  // 定时任务模式（去掉 .filter()）
   var store = loadStore();
-  var ids = store.order.filter(function(id) { return store.accounts[id]; });
+  var ids = [];
+  var order = store.order;
+  for (var i = 0; i < order.length; i++) {
+    var id = order[i];
+    if (store.accounts[id]) ids.push(id);
+  }
   if (!ids.length) {
     notify('未抓到任何账号', '请先打开 WeTalk 触发抓包');
     $done();
@@ -386,16 +409,18 @@ if (typeof $request !== 'undefined' && $request) {
     var total = ids.length;
     var results = [];
     var chain = Promise.resolve();
-    ids.forEach(function(id, idx) {
-      chain = chain.then(function() {
-        return runAccount(store.accounts[id], store);
-      }).then(function(text) {
-        results.push(text);
-        if (idx < ids.length - 1) {
-          return sleep(ACCOUNT_GAP);
-        }
-      });
-    });
+    for (var idx = 0; idx < ids.length; idx++) {
+      (function(index) {
+        chain = chain.then(function() {
+          return runAccount(store.accounts[ids[index]], store);
+        }).then(function(text) {
+          results.push(text);
+          if (index < ids.length - 1) {
+            return sleep(ACCOUNT_GAP);
+          }
+        });
+      })(idx);
+    }
     chain.then(function() {
       notify('全部完成 (' + total + '个账号)', results.join('\n———\n'));
       $done();
