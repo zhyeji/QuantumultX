@@ -347,8 +347,8 @@ function runAccount(acc, store) {
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
       finalBalance = Number(d.result.balance);
     }
-    var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(2) : '--';
-    var fin = finalBalance !== '--' ? finalBalance.toFixed(2) : '--';
+    var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
+    var fin = finalBalance !== '--' ? finalBalance.toFixed(3) : '--';
 
     // 动态对齐：计算左半部分长度，较短者补足空格，且数值与分号间加一个空格
     var leftCoin = '初始金币: ' + ini + ' ';  // 注意后面先加一个空格再拼分号
@@ -363,7 +363,7 @@ function runAccount(acc, store) {
     saveStore(store);
     return line1 + '\n' + line2;
   }).catch(function(err) {
-    var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(2) : '--';
+    var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
     var leftCoin = '初始金币: ' + ini + ' ';
     var leftSign = '今日签到: ' + stats.checkInCount + ' 次 ';
     var maxLen = Math.max(leftCoin.length, leftSign.length);
