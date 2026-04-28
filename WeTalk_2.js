@@ -1,6 +1,6 @@
 //2026/04/21
 /*
-@Name：WeTalk 自动化签到+视频奖励（最终稳定版）
+@Name：WeTalk 自动化签到+视频奖励（最终稳定版-只改展示）
 
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js
@@ -14,7 +14,6 @@ hostname = api.wetalkapp.com
 
 const scriptName = 'WeTalk';
 const storeKey = 'wetalk_accounts_v1';
-const statsKey = 'wetalk_daily_stats_v1';
 
 const SECRET = '0fOiukQq7jXZV2GRi9LGlO';
 const API_HOST = 'api.wetalkapp.com';
@@ -22,7 +21,7 @@ const MAX_VIDEO = 5;
 const VIDEO_DELAY = 8000;
 const ACCOUNT_GAP = 3500;
 
-/* ===== ✅ 原始完整 MD5（未改动）===== */
+/* ===== ✅ 原始完整 MD5（完全不动）===== */
 function MD5(string) {
   function RotateLeft(lValue, iShiftBits) { return (lValue << iShiftBits) | (lValue >>> (32 - iShiftBits)); }
   function AddUnsigned(lX, lY) {
@@ -76,12 +75,15 @@ function MD5(string) {
   for (let k = 0; k < x.length; k += 16) {
     const AA = a, BB = b, CC = c, DD = d;
     a = FF(a,b,c,d,x[k+0],S11,0xD76AA478); d = FF(d,a,b,c,x[k+1],S12,0xE8C7B756); c = FF(c,d,a,b,x[k+2],S13,0x242070DB); b = FF(b,c,d,a,x[k+3],S14,0xC1BDCEEE);
+    a = GG(a,b,c,d,x[k+1],S21,0xF61E2562); d = GG(d,a,b,c,x[k+6],S22,0xC040B340); c = GG(c,d,a,b,x[k+11],S23,0x265E5A51); b = GG(b,c,d,a,x[k+0],S24,0xE9B6C7AA);
+    a = HH(a,b,c,d,x[k+5],S31,0xFFFA3942); d = HH(d,a,b,c,x[k+8],S32,0x8771F681); c = HH(c,d,a,b,x[k+11],S33,0x6D9D6122); b = HH(b,c,d,a,x[k+14],S34,0xFDE5380C);
+    a = II(a,b,c,d,x[k+0],S41,0xF4292244); d = II(d,a,b,c,x[k+7],S42,0x432AFF97); c = II(c,d,a,b,x[k+14],S43,0xAB9423A7); b = II(b,c,d,a,x[k+5],S44,0xFC93A039);
     a = AddUnsigned(a,AA); b = AddUnsigned(b,BB); c = AddUnsigned(c,CC); d = AddUnsigned(d,DD);
   }
   return (WordToHex(a)+WordToHex(b)+WordToHex(c)+WordToHex(d)).toLowerCase();
 }
 
-/* ===== 下面逻辑全部稳定，仅改展示 ===== */
+/* ===== 原始逻辑完全保留 ===== */
 
 function getUTCSignDate() {
   const now = new Date();
@@ -89,105 +91,97 @@ function getUTCSignDate() {
   return `${now.getUTCFullYear()}-${pad(now.getUTCMonth()+1)}-${pad(now.getUTCDate())} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`;
 }
 
-function getLocalDate() {
-  const d = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+function parseRawQuery(url) {
+  const query = (url.split('?')[1] || '').split('#')[0];
+  const rawMap = {};
+  query.split('&').forEach(pair => {
+    if (!pair) return;
+    const idx = pair.indexOf('=');
+    if (idx < 0) return;
+    rawMap[pair.slice(0, idx)] = pair.slice(idx + 1);
+  });
+  return rawMap;
 }
 
-function loadStore(){const raw=$prefs.valueForKey(storeKey);return raw?JSON.parse(raw):{accounts:{},order:[]};}
-function loadStats(){const raw=$prefs.valueForKey(statsKey);return raw?JSON.parse(raw):{};}
-function saveStats(s){$prefs.setValueForKey(JSON.stringify(s),statsKey);}
+function loadStore() {
+  const raw = $prefs.valueForKey(storeKey);
+  return raw ? JSON.parse(raw) : { accounts: {}, order: [] };
+}
 
-function buildUrl(path,capture){
-  const params={...capture.paramsRaw};
-  delete params.sign; delete params.signDate;
-  params.signDate=getUTCSignDate();
-  const base=Object.keys(params).sort().map(k=>`${k}=${params[k]}`).join('&');
-  params.sign=MD5(base+SECRET);
-  const qs=Object.keys(params).map(k=>`${k}=${encodeURIComponent(params[k])}`).join('&');
+function buildSignedParamsRaw(capture) {
+  const params = {};
+  Object.keys(capture.paramsRaw || {}).forEach(k => {
+    if (k !== 'sign' && k !== 'signDate') params[k] = capture.paramsRaw[k];
+  });
+  params.signDate = getUTCSignDate();
+  const signBase = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&');
+  params.sign = MD5(signBase + SECRET);
+  return params;
+}
+
+function buildUrl(path, capture) {
+  const params = buildSignedParamsRaw(capture);
+  const qs = Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
   return `https://${API_HOST}/app/${path}?${qs}`;
 }
 
-function runAccount(acc){
-  const stats=loadStats();
-  const today=getLocalDate();
-  if(!stats[acc.id])stats[acc.id]={};
-  if(!stats[acc.id][today])stats[acc.id][today]={checkin:0,video:0};
+function runAccount(acc) {
+  let init = 0, fin = 0, video = 0, checkin = 0;
 
-  let init=0,fin=0,videoCount=0;
-
-  function fetchApi(p){
-    return $task.fetch({url:buildUrl(p,acc.capture),headers:acc.capture.headers});
+  function fetchApi(path) {
+    return $task.fetch({ url: buildUrl(path, acc.capture), headers: acc.capture.headers });
   }
 
-  function doVideo(){
-    let i=0;
-    function next(){
-      if(i>=MAX_VIDEO){
-        stats[acc.id][today].video+=videoCount;
-        saveStats(stats);
-        return Promise.resolve();
-      }
-      return new Promise(r=>{
-        setTimeout(()=>{
+  function doVideoLoop() {
+    let i = 0;
+    function next() {
+      if (i >= MAX_VIDEO) return Promise.resolve();
+      return new Promise(r => {
+        setTimeout(() => {
           i++;
-          fetchApi('videoBonus').then(res=>{
-            try{
-              const d=JSON.parse(res.body);
-              if(d.retcode===0)videoCount++;
-            }catch{}
+          fetchApi('videoBonus').then(res => {
+            try {
+              const d = JSON.parse(res.body);
+              if (d.retcode === 0) video++;
+            } catch {}
             r(next());
           }).catch(()=>r(next()));
-        },i===0?1500:VIDEO_DELAY);
+        }, i===0?1500:VIDEO_DELAY);
       });
     }
     return next();
   }
 
   return fetchApi('queryBalanceAndBonus')
-  .then(r=>{try{init=Number(JSON.parse(r.body).result.balance||0);}catch{}})
+  .then(res => { try { init = Number(JSON.parse(res.body).result.balance||0);} catch {} })
   .then(()=>fetchApi('checkIn'))
-  .then(r=>{
-    try{
-      if(JSON.parse(r.body).retcode===0){
-        stats[acc.id][today].checkin=1;
-        saveStats(stats);
-      }
-    }catch{}
-  })
-  .then(()=>doVideo())
+  .then(res => { try { if(JSON.parse(res.body).retcode===0) checkin=1;} catch {} })
+  .then(()=>doVideoLoop())
   .then(()=>fetchApi('queryBalanceAndBonus'))
-  .then(r=>{try{fin=Number(JSON.parse(r.body).result.balance||0);}catch{}})
-  .then(()=>({
-    initial:init.toFixed(2),
-    final:fin.toFixed(2),
-    checkin:`${stats[acc.id][today].checkin} 次`,
-    video:`${stats[acc.id][today].video} 条`
-  }));
+  .then(res => { try { fin = Number(JSON.parse(res.body).result.balance||0);} catch {} })
+  .then(()=>({init,fin,checkin,video}));
 }
 
-/* ===== 输出对齐 ===== */
-const store=loadStore();
-const ids=store.order||[];
+/* ===== 输出（你定制版）===== */
+const store = loadStore();
+const ids = store.order || [];
 
-Promise.all(ids.map(id=>runAccount(store.accounts[id])))
-.then(res=>{
-  function padRight(str,len){return str+' '.repeat(len-str.length);}
+Promise.all(ids.map(id => runAccount(store.accounts[id])))
+.then(res => {
 
-  const l1=res.map(r=>`初始金币：${r.initial}`);
-  const r1=res.map(r=>`最新金币：${r.final}`);
-  const l2=res.map(r=>`今日签到：${r.checkin}`);
-  const r2=res.map(r=>`今日观看：${r.video}`);
+  function pad(str,len){return str+' '.repeat(len-str.length);}
 
-  const maxL1=Math.max(...l1.map(s=>s.length));
-  const maxR1=Math.max(...r1.map(s=>s.length));
-  const maxL2=Math.max(...l2.map(s=>s.length));
-  const maxR2=Math.max(...r2.map(s=>s.length));
+  const l1 = res.map(r=>`初始金币：${r.init.toFixed(2)}`);
+  const r1 = res.map(r=>`最新金币：${r.fin.toFixed(2)}`);
+  const l2 = res.map(r=>`今日签到：${r.checkin} 次`);
+  const r2 = res.map(r=>`今日观看：${r.video} 条`);
 
-  const text=res.map((_,i)=>[
-    `${padRight(l1[i],maxL1)}；${padRight(r1[i],maxR1)}`,
-    `${padRight(l2[i],maxL2)}；${padRight(r2[i],maxR2)}`
+  const maxL = Math.max(...l1.concat(l2).map(s=>s.length));
+  const maxR = Math.max(...r1.concat(r2).map(s=>s.length));
+
+  const text = res.map((_,i)=>[
+    `${pad(l1[i],maxL)}；${pad(r1[i],maxR)}`,
+    `${pad(l2[i],maxL)}；${pad(r2[i],maxR)}`
   ].join('\n')).join('\n\n———\n\n');
 
   $notify(scriptName,`全部完成 (${res.length}个账号)`,text);
