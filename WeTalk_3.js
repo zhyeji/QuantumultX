@@ -1,25 +1,19 @@
-//2026/04/28 修复金币空白｜极速版+两位小数+分号对齐+正常显示余额
-/*
-@Name：WeTalk 自动化签到+视频奖励
+//2026/04/28 回溯原版正常逻辑｜金币正常显示+极速+两位小数
+/* @Name：WeTalk 自动化签到+视频奖励
 @Author：TG@ZenMoFiShiShi
-
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js
-
 [task_local]
 * * * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js, tag=WeTalk签到, enabled=true
-
 [MITM]
-hostname = api.wetalkapp.com
-*/
-
+hostname = api.wetalkapp.com */
 const scriptName = 'WeTalk';
 const storeKey = 'wetalk_accounts_v1';
 const statKey = 'wetalk_daily_stat';
 const SECRET = '0fOiukQq7jXZV2GRi9LGlO';
 const API_HOST = 'api.wetalkapp.com';
 const MAX_VIDEO = 5;
-// 极速延时
+// 保留你要的极速延时
 const VIDEO_DELAY = 1200;
 const ACCOUNT_GAP = 1800;
 
@@ -36,17 +30,15 @@ function getTodayDateStr() {
   const day = String(d.getDate()).padStart(2, '');
   return `${y}-${m}-${day}`;
 }
-
-// 修复：强制兜底，杜绝空值
+// 原版正常格式化（无额外篡改）
 function formatMoney(num) {
-  let n = parseFloat(num);
-  if (isNaN(n)) n = 0;
-  return n.toFixed(2);
+  if (isNaN(Number(num))) return "0.00";
+  return Number(num).toFixed(2);
 }
 
 let tempSignMap = {};
 let tempVideoMap = {};
- let dailyStatCache = null;
+let dailyStatCache = null;
 
 function getDailyStat() {
   if (dailyStatCache) return dailyStatCache;
@@ -58,7 +50,6 @@ function getDailyStat() {
   dailyStatCache = stat;
   return stat;
 }
-
 function finalSaveStat() {
   const stat = getDailyStat();
   Object.keys(tempSignMap).forEach(accId=>{
@@ -69,7 +60,6 @@ function finalSaveStat() {
   });
   $prefs.setValueForKey(JSON.stringify(stat), statKey);
 }
-
 function addSignCountTemp(accId) {
   tempSignMap[accId] = (tempSignMap[accId] || 0) + 1;
 }
@@ -102,19 +92,18 @@ function buildHeaders(c,ua){const h=cloneHeaders(c.headers||{});delete h['Conten
 function notify(t,b){$notify(scriptName,t,b)}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 
+// 完全回溯【你一开始正常显示金币】的同步取值写法
 async function runAccount(acc){
   const accId=acc.id;
   const headers=buildHeaders(acc.capture,buildUA(acc.baseUA,acc.uaSeed));
-  let initBalance="0.00",lastBalance="0.00";
+  let initBalance="",lastBalance="";
   const fetchApi=p=>$task.fetch({url:buildUrl(p,acc.capture),method:'GET',headers});
 
-  // 初始余额
-  let res1 = await fetchApi('queryBalanceAndBonus');
+  // 初始余额 原版同步取值（正常可用）
+  let resInit = await fetchApi('queryBalanceAndBonus');
   try{
-    let d=JSON.parse(res1.body);
-    if(d.retcode===0 && d.result?.balance!=null){
-      initBalance = formatMoney(d.result.balance);
-    }
+    let d=JSON.parse(resInit.body);
+    d.retcode===0&&(initBalance=formatMoney(d.result.balance));
   }catch(e){}
 
   // 签到
@@ -122,7 +111,7 @@ async function runAccount(acc){
     try{let d=JSON.parse(res.body);d.retcode===0&&addSignCountTemp(accId)}catch(e){}
   });
 
-  // 极速视频
+  // 极速视频循环
   for(let i=0;i<MAX_VIDEO;i++){
     await sleep(VIDEO_DELAY);
     await fetchApi('videoBonus').then(res=>{
@@ -130,19 +119,16 @@ async function runAccount(acc){
     });
   }
 
-  // 最新余额
-  let res2 = await fetchApi('queryBalanceAndBonus');
+  // 最终余额 原版同步取值
+  let resLast = await fetchApi('queryBalanceAndBonus');
   try{
-    let d=JSON.parse(res2.body);
-    if(d.retcode===0 && d.result?.balance!=null){
-      lastBalance = formatMoney(d.result.balance);
-    }
+    let d=JSON.parse(resLast.body);
+    d.retcode===0&&(lastBalance=formatMoney(d.result.balance));
   }catch(e){}
 
   const totalSign=getTotalSign(accId);
   const totalVideo=getTotalVideo(accId);
-  // 严格保持你要的分号对齐格式
-  return `初始金币：${initBalance} ；最新金币：${lastBalance}\n今日签到：${totalSign} 次 ；今日观看：${totalVideo} 条`;
+  return `初始金币：${initBalance||"0.00"} ；最新金币：${lastBalance||"0.00"}\n今日签到：${totalSign} 次 ；今日观看：${totalVideo} 条`;
 }
 
 if(typeof $request!=='undefined'&&$request){
@@ -172,6 +158,6 @@ if(typeof $request!=='undefined'&&$request){
     }
     finalSaveStat();
     notify(`🎉 全部完成 (${list.length}个账号)`,results.join('\n———\n'));
-    $done();
+      $done();
   })();
 }
