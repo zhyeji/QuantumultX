@@ -1,6 +1,3 @@
-收到。改动点明确，直接看代码。
-
-```javascript
 /*
 @Name：WeTalk 自动化签到+视频奖励
 @Author：TG@ZenMoFiShi
@@ -13,26 +10,41 @@
 hostname = api.wetalkapp.com
 */
 
-const scriptName = 'WeTalk';
-const storeKey = 'wetalk_accounts_v1';
-const SECRET = '0fOiukQq7jXZV2GRi9LGlO';
-const API_HOST = 'api.wetalkapp.com';
-const MAX_VIDEO = 5;
-const VIDEO_DELAY = 8000;
-const ACCOUNT_GAP = 3500;
+var scriptName = 'WeTalk';
+var storeKey = 'wetalk_accounts_v1';
+var SECRET = '0fOiukQq7jXZV2GRi9LGlO';
+var API_HOST = 'api.wetalkapp.com';
+var MAX_VIDEO = 5;
+var VIDEO_DELAY = 8000;
+var ACCOUNT_GAP = 3500;
 
-const IOS_VERSIONS = ['17.5.1','17.6.1','17.4.1','17.2.1','16.7.8','17.6','17.3.1','18.0.1','17.1.2','16.6.1'];
-const IOS_SCALES = ['2.00','3.00','3.00','2.00','3.00'];
-const IPHONE_MODELS = ['iPhone14,3','iPhone13,3','iPhone15,3','iPhone16,1','iPhone14,7','iPhone13,2','iPhone15,2','iPhone12,1'];
-const CFN_VERS = ['1410.0.3','1494.0.7','1568.100.1','1209.1','1474.0.4','1568.200.2'];
-const DARWIN_VERS = ['22.6.0','23.5.0','23.6.0','24.0.0','22.4.0'];
+var IOS_VERSIONS = ['17.5.1','17.6.1','17.4.1','17.2.1','16.7.8','17.6','17.3.1','18.0.1','17.1.2','16.6.1'];
+var IOS_SCALES = ['2.00','3.00','3.00','2.00','3.00'];
+var IPHONE_MODELS = ['iPhone14,3','iPhone13,3','iPhone15,3','iPhone16,1','iPhone14,7','iPhone13,2','iPhone15,2','iPhone12,1'];
+var CFN_VERS = ['1410.0.3','1494.0.7','1568.100.1','1209.1','1474.0.4','1568.200.2'];
+var DARWIN_VERS = ['22.6.0','23.5.0','23.6.0','24.0.0','22.4.0'];
 
-// -------------------- MD5 （保留原始实现，确保兼容） --------------------
+// ==================== ES5 补丁 ====================
+// padStart polyfill
+function padStart(str, len, pad) {
+  str = String(str);
+  while (str.length < len) str = pad + str;
+  return str;
+}
+
+// Array fill polyfill
+function arrayFill(size, value) {
+  var arr = [];
+  for (var i = 0; i < size; i++) arr.push(value);
+  return arr;
+}
+
+// ==================== MD5 ====================
 function MD5(string) {
   function RotateLeft(lValue, iShiftBits) { return (lValue << iShiftBits) | (lValue >>> (32 - iShiftBits)); }
   function AddUnsigned(lX, lY) {
-    const lX4 = lX & 0x40000000, lY4 = lY & 0x40000000, lX8 = lX & 0x80000000, lY8 = lY & 0x80000000;
-    const lResult = (lX & 0x3FFFFFFF) + (lY & 0x3FFFFFFF);
+    var lX4 = lX & 0x40000000, lY4 = lY & 0x40000000, lX8 = lX & 0x80000000, lY8 = lY & 0x80000000;
+    var lResult = (lX & 0x3FFFFFFF) + (lY & 0x3FFFFFFF);
     if (lX4 & lY4) return lResult ^ 0x80000000 ^ lX8 ^ lY8;
     if (lX4 | lY4) return (lResult & 0x40000000) ? (lResult ^ 0xC0000000 ^ lX8 ^ lY8) : (lResult ^ 0x40000000 ^ lX8 ^ lY8);
     return lResult ^ lX8 ^ lY8;
@@ -46,19 +58,19 @@ function MD5(string) {
   function HH(a, b, c, d, x, s, ac) { a = AddUnsigned(a, AddUnsigned(AddUnsigned(H(b, c, d), x), ac)); return AddUnsigned(RotateLeft(a, s), b); }
   function II(a, b, c, d, x, s, ac) { a = AddUnsigned(a, AddUnsigned(AddUnsigned(I(b, c, d), x), ac)); return AddUnsigned(RotateLeft(a, s), b); }
   function ConvertToWordArray(str) {
-    const lMessageLength = str.length;
-    const lNumberOfWords_temp1 = lMessageLength + 8;
-    const lNumberOfWords_temp2 = (lNumberOfWords_temp1 - (lNumberOfWords_temp1 % 64)) / 64;
-    const lNumberOfWords = (lNumberOfWords_temp2 + 1) * 16;
-    const lWordArray = Array(lNumberOfWords - 1).fill(0);
-    let lBytePosition = 0, lByteCount = 0;
+    var lMessageLength = str.length;
+    var lNumberOfWords_temp1 = lMessageLength + 8;
+    var lNumberOfWords_temp2 = (lNumberOfWords_temp1 - (lNumberOfWords_temp1 % 64)) / 64;
+    var lNumberOfWords = (lNumberOfWords_temp2 + 1) * 16;
+    var lWordArray = arrayFill(lNumberOfWords, 0);          // 用 polyfill 替换 fill
+    var lBytePosition = 0, lByteCount = 0;
     while (lByteCount < lMessageLength) {
-      const lWordCount = (lByteCount - (lByteCount % 4)) / 4;
+      var lWordCount = (lByteCount - (lByteCount % 4)) / 4;
       lBytePosition = (lByteCount % 4) * 8;
       lWordArray[lWordCount] |= str.charCodeAt(lByteCount) << lBytePosition;
       lByteCount++;
     }
-    const lWordCount = (lByteCount - (lByteCount % 4)) / 4;
+    var lWordCount = (lByteCount - (lByteCount % 4)) / 4;
     lBytePosition = (lByteCount % 4) * 8;
     lWordArray[lWordCount] |= 0x80 << lBytePosition;
     lWordArray[lNumberOfWords - 2] = lMessageLength << 3;
@@ -66,20 +78,20 @@ function MD5(string) {
     return lWordArray;
   }
   function WordToHex(lValue) {
-    let WordToHexValue = '';
-    for (let lCount = 0; lCount <= 3; lCount++) {
-      const lByte = (lValue >>> (lCount * 8)) & 255;
-      const WordToHexValue_temp = '0' + lByte.toString(16);
+    var WordToHexValue = '';
+    for (var lCount = 0; lCount <= 3; lCount++) {
+      var lByte = (lValue >>> (lCount * 8)) & 255;
+      var WordToHexValue_temp = '0' + lByte.toString(16);
       WordToHexValue += WordToHexValue_temp.substr(WordToHexValue_temp.length - 2, 2);
     }
     return WordToHexValue;
   }
-  const x = ConvertToWordArray(string);
-  let a = 0x67452301, b = 0xEFCDAB89, c = 0x98BADCFE, d = 0x10325476;
-  const S11 = 7, S12 = 12, S13 = 17, S14 = 22, S21 = 5, S22 = 9, S23 = 14, S24 = 20;
-  const S31 = 4, S32 = 11, S33 = 16, S34 = 23, S41 = 6, S42 = 10, S43 = 15, S44 = 21;
-  for (let k = 0; k < x.length; k += 16) {
-    const AA = a, BB = b, CC = c, DD = d;
+  var x = ConvertToWordArray(string);
+  var a = 0x67452301, b = 0xEFCDAB89, c = 0x98BADCFE, d = 0x10325476;
+  var S11 = 7, S12 = 12, S13 = 17, S14 = 22, S21 = 5, S22 = 9, S23 = 14, S24 = 20;
+  var S31 = 4, S32 = 11, S33 = 16, S34 = 23, S41 = 6, S42 = 10, S43 = 15, S44 = 21;
+  for (var k = 0; k < x.length; k += 16) {
+    var AA = a, BB = b, CC = c, DD = d;
     a = FF(a,b,c,d,x[k+0],S11,0xD76AA478); d = FF(d,a,b,c,x[k+1],S12,0xE8C7B756); c = FF(c,d,a,b,x[k+2],S13,0x242070DB); b = FF(b,c,d,a,x[k+3],S14,0xC1BDCEEE);
     a = FF(a,b,c,d,x[k+4],S11,0xF57C0FAF); d = FF(d,a,b,c,x[k+5],S12,0x4787C62A); c = FF(c,d,a,b,x[k+6],S13,0xA8304613); b = FF(b,c,d,a,x[k+7],S14,0xFD469501);
     a = FF(a,b,c,d,x[k+8],S11,0x698098D8); d = FF(d,a,b,c,x[k+9],S12,0x8B44F7AF); c = FF(c,d,a,b,x[k+10],S13,0xFFFF5BB1); b = FF(b,c,d,a,x[k+11],S14,0x895CD7BE);
@@ -101,45 +113,58 @@ function MD5(string) {
   return (WordToHex(a) + WordToHex(b) + WordToHex(c) + WordToHex(d)).toLowerCase();
 }
 
-// -------------------- 工具函数 --------------------
+// ==================== 工具函数 ====================
 function getUTCSignDate() {
-  const now = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  return `${now.getUTCFullYear()}-${pad(now.getUTCMonth()+1)}-${pad(now.getUTCDate())} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`;
+  var now = new Date();
+  var pad = function(n) { return padStart(String(n), 2, '0'); };  // 用 polyfill
+  return now.getUTCFullYear() + '-' + pad(now.getUTCMonth()+1) + '-' + pad(now.getUTCDate()) + ' ' +
+         pad(now.getUTCHours()) + ':' + pad(now.getUTCMinutes()) + ':' + pad(now.getUTCSeconds());
 }
 
 function normalizeHeaderNameMap(headers) {
-  const out = {};
-  Object.keys(headers || {}).forEach(k => out[k] = headers[k]);
+  var out = {};
+  if (headers) {
+    var keys = Object.keys(headers);
+    for (var i = 0; i < keys.length; i++) {
+      out[keys[i]] = headers[keys[i]];
+    }
+  }
   return out;
 }
 
 function parseRawQuery(url) {
-  const query = (url.split('?')[1] || '').split('#')[0];
-  const rawMap = {};
-  query.split('&').forEach(pair => {
-    if (!pair) return;
-    const idx = pair.indexOf('=');
-    if (idx < 0) return;
-    const k = pair.slice(0, idx);
-    const v = pair.slice(idx + 1);
+  var query = (url.split('?')[1] || '').split('#')[0];
+  var rawMap = {};
+  var pairs = query.split('&');
+  for (var i = 0; i < pairs.length; i++) {
+    var pair = pairs[i];
+    if (!pair) continue;
+    var idx = pair.indexOf('=');
+    if (idx < 0) continue;
+    var k = pair.slice(0, idx);
+    var v = pair.slice(idx + 1);
     rawMap[k] = v;
-  });
+  }
   return rawMap;
 }
 
 function fingerprintOf(paramsRaw) {
-  const drop = { sign:1, signDate:1, timestamp:1, ts:1, nonce:1, random:1, reqTime:1, reqId:1, requestId:1 };
-  const base = Object.keys(paramsRaw || {}).filter(k => !drop[k]).sort().map(k => `${k}=${paramsRaw[k]}`).join('&');
+  var drop = { sign:1, signDate:1, timestamp:1, ts:1, nonce:1, random:1, reqTime:1, reqId:1, requestId:1 };
+  var keys = Object.keys(paramsRaw || {}).filter(function(k) { return !drop[k]; }).sort();
+  var base = '';
+  for (var i = 0; i < keys.length; i++) {
+    if (i > 0) base += '&';
+    base += keys[i] + '=' + paramsRaw[keys[i]];
+  }
   return MD5(base).slice(0, 12);
 }
 
-// -------------------- 存储 --------------------
+// ==================== 存储 ====================
 function loadStore() {
-  const raw = $prefs.valueForKey(storeKey);
+  var raw = $prefs.valueForKey(storeKey);
   if (!raw) return { version: 1, accounts: {}, order: [], dailyStats: {} };
   try {
-    const obj = JSON.parse(raw);
+    var obj = JSON.parse(raw);
     if (!obj.accounts) obj.accounts = {};
     if (!Array.isArray(obj.order)) obj.order = Object.keys(obj.accounts);
     if (!obj.dailyStats) obj.dailyStats = {};
@@ -153,209 +178,230 @@ function saveStore(store) {
   $prefs.setValueForKey(JSON.stringify(store), storeKey);
 }
 
-// -------------------- 随机化 --------------------
+// ==================== 随机化 ====================
 function pickItem(arr, seed) {
   return arr[seed % arr.length];
 }
 
 function buildUA(baseUA, seed) {
-  const iosVer = pickItem(IOS_VERSIONS, seed);
-  const scale = pickItem(IOS_SCALES, seed + 1);
-  const model = pickItem(IPHONE_MODELS, seed + 2);
-  const cfn = pickItem(CFN_VERS, seed + 3);
-  const darwin = pickItem(DARWIN_VERS, seed + 4);
+  var iosVer = pickItem(IOS_VERSIONS, seed);
+  var scale = pickItem(IOS_SCALES, seed + 1);
+  var model = pickItem(IPHONE_MODELS, seed + 2);
+  var cfn = pickItem(CFN_VERS, seed + 3);
+  var darwin = pickItem(DARWIN_VERS, seed + 4);
   if (baseUA && typeof baseUA === 'string') {
-    let ua = baseUA;
-    let changed = false;
-    if (/iOS \d+(\.\d+){0,2}/.test(ua)) { ua = ua.replace(/iOS \d+(\.\d+){0,2}/, `iOS ${iosVer}`); changed = true; }
-    if (/Scale\/\d+(\.\d+)?/.test(ua)) { ua = ua.replace(/Scale\/\d+(\.\d+)?/, `Scale/${scale}`); changed = true; }
+    var ua = baseUA;
+    var changed = false;
+    if (/iOS \d+(\.\d+){0,2}/.test(ua)) { ua = ua.replace(/iOS \d+(\.\d+){0,2}/, 'iOS ' + iosVer); changed = true; }
+    if (/Scale\/\d+(\.\d+)?/.test(ua)) { ua = ua.replace(/Scale\/\d+(\.\d+)?/, 'Scale/' + scale); changed = true; }
     if (/iPhone\d+,\d+/.test(ua)) { ua = ua.replace(/iPhone\d+,\d+/, model); changed = true; }
-    if (/CFNetwork\/[\d.]+/.test(ua)) { ua = ua.replace(/CFNetwork\/[\d.]+/, `CFNetwork/${cfn}`); changed = true; }
-    if (/Darwin\/[\d.]+/.test(ua)) { ua = ua.replace(/Darwin\/[\d.]+/, `Darwin/${darwin}`); changed = true; }
+    if (/CFNetwork\/[\d.]+/.test(ua)) { ua = ua.replace(/CFNetwork\/[\d.]+/, 'CFNetwork/' + cfn); changed = true; }
+    if (/Darwin\/[\d.]+/.test(ua)) { ua = ua.replace(/Darwin\/[\d.]+/, 'Darwin/' + darwin); changed = true; }
     if (changed) return ua;
   }
-  return `WeTalk/30.6.0 (com.innovationworks.wetalk; build:28; iOS ${iosVer}) Alamofire/5.4.3`;
+  return 'WeTalk/30.6.0 (com.innovationworks.wetalk; build:28; iOS ' + iosVer + ') Alamofire/5.4.3';
 }
 
-// -------------------- 网络请求拼装 --------------------
+// ==================== 请求构造 ====================
 function buildSignedParamsRaw(capture) {
-  const params = {};
-  Object.keys(capture.paramsRaw || {}).forEach(k => {
+  var params = {};
+  var keys = Object.keys(capture.paramsRaw || {});
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
     if (k !== 'sign' && k !== 'signDate') params[k] = capture.paramsRaw[k];
-  });
+  }
   params.signDate = getUTCSignDate();
-  const signBase = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&');
+  var sortedKeys = Object.keys(params).sort();
+  var signBase = '';
+  for (var i = 0; i < sortedKeys.length; i++) {
+    if (i > 0) signBase += '&';
+    signBase += sortedKeys[i] + '=' + params[sortedKeys[i]];
+  }
   params.sign = MD5(signBase + SECRET);
   return params;
 }
 
 function buildUrl(path, capture) {
-  const params = buildSignedParamsRaw(capture);
-  const qs = Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
-  return `https://${API_HOST}/app/${path}?${qs}`;
+  var params = buildSignedParamsRaw(capture);
+  var keys = Object.keys(params);
+  var qs = '';
+  for (var i = 0; i < keys.length; i++) {
+    if (i > 0) qs += '&';
+    qs += keys[i] + '=' + encodeURIComponent(params[keys[i]]);
+  }
+  return 'https://' + API_HOST + '/app/' + path + '?' + qs;
 }
 
 function cloneHeaders(headers) {
-  return { ...headers };
+  var out = {};
+  if (headers) {
+    var keys = Object.keys(headers);
+    for (var i = 0; i < keys.length; i++) {
+      out[keys[i]] = headers[keys[i]];
+    }
+  }
+  return out;
 }
 
 function buildHeaders(capture, ua) {
-  const headers = cloneHeaders(capture.headers || {});
+  var headers = cloneHeaders(capture.headers || {});
   delete headers['Content-Length']; delete headers['content-length'];
   delete headers[':authority']; delete headers[':method']; delete headers[':path']; delete headers[':scheme'];
   headers['Host'] = API_HOST;
   headers['Accept'] = headers['Accept'] || 'application/json';
-  Object.keys(headers).forEach(k => { if (k.toLowerCase() === 'user-agent') delete headers[k]; });
+  // 强制替换 User-Agent
+  var headerKeys = Object.keys(headers);
+  for (var i = 0; i < headerKeys.length; i++) {
+    if (headerKeys[i].toLowerCase() === 'user-agent') delete headers[headerKeys[i]];
+  }
   headers['User-Agent'] = ua;
   return headers;
 }
 
-// -------------------- 工具 --------------------
+// ==================== 通知等 ====================
 function notify(title, body) {
   $notify(scriptName, title, body);
 }
 
 function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
+  return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// -------------------- 单账号执行（核心） --------------------
+// ==================== 单账号执行（核心） ====================
 function runAccount(acc, store) {
-  const today = new Date().toLocaleDateString('zh-CN'); // 本地日期
-  let stats = store.dailyStats[acc.id];
+  // 日期
+  var now = new Date();
+  var today = now.getFullYear() + '/' + (now.getMonth() + 1) + '/' + now.getDate();
+  var stats = store.dailyStats[acc.id];
   if (!stats || stats.date !== today) {
     stats = { date: today, checkInCount: 0, videoCount: 0, initialBalance: null };
   }
 
-  const ua = buildUA(acc.baseUA, acc.uaSeed);
-  const headers = buildHeaders(acc.capture, ua);
+  var ua = buildUA(acc.baseUA, acc.uaSeed);
+  var headers = buildHeaders(acc.capture, ua);
 
   function fetchApi(path) {
-    return $task.fetch({ url: buildUrl(path, acc.capture), method: 'GET', headers });
+    return $task.fetch({ url: buildUrl(path, acc.capture), method: 'GET', headers: headers });
   }
 
-  // 获取初始余额
-  return fetchApi('queryBalanceAndBonus').then(res => {
+  // 查初始余额
+  return fetchApi('queryBalanceAndBonus').then(function(res) {
     try {
-      const d = JSON.parse(res.body);
+      var d = JSON.parse(res.body);
       if (d.retcode === 0) {
-        const bal = Number(d.result.balance);
+        var bal = Number(d.result.balance);
         if (stats.initialBalance === null) stats.initialBalance = bal;
-        return bal; // 无需返回
       }
     } catch (e) {}
-    return undefined;
-  }).then(() => fetchApi('checkIn')).then(res => {
+    return fetchApi('checkIn');
+  }).then(function(res) {
     try {
-      const d = JSON.parse(res.body);
+      var d = JSON.parse(res.body);
       if (d.retcode === 0) stats.checkInCount++;
     } catch (e) {}
     // 领视频奖励
-    let p = Promise.resolve();
-    for (let i = 0; i < MAX_VIDEO; i++) {
-      p = p.then(() => new Promise(resolve => {
-        setTimeout(() => {
-          resolve(fetchApi('videoBonus').then(res => {
-            try {
-              const d = JSON.parse(res.body);
-              if (d.retcode === 0) stats.videoCount++;
-            } catch (e) {}
-          }));
-        }, i === 0 ? 1500 : VIDEO_DELAY);
-      }));
+    var p = Promise.resolve();
+    for (var i = 0; i < MAX_VIDEO; i++) {
+      p = p.then(function(videoIdx) {
+        return new Promise(function(resolve) {
+          setTimeout(function() {
+            resolve(fetchApi('videoBonus').then(function(res) {
+              try {
+                var d = JSON.parse(res.body);
+                if (d.retcode === 0) stats.videoCount++;
+              } catch (e) {}
+            }));
+          }, videoIdx === 0 ? 1500 : VIDEO_DELAY);
+        }).bind(null, i); // 注意：需要正确传递 i
+      }(i));
     }
     return p;
-  }).then(() => fetchApi('queryBalanceAndBonus')).then(res => {
-    let finalBalance = '--';
+  }).then(function() {
+    return fetchApi('queryBalanceAndBonus');
+  }).then(function(res) {
+    var finalBalance = '--';
     try {
-      const d = JSON.parse(res.body);
+      var d = JSON.parse(res.body);
       if (d.retcode === 0) finalBalance = Number(d.result.balance);
     } catch (e) {}
-    const ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(2) : '--';
-    const fin = finalBalance !== '--' ? finalBalance.toFixed(2) : '--';
-    const line1 = `初始金币: ${ini} ; 最新金币: ${fin}`;
-    const line2 = `今日签到: ${stats.checkInCount} 次    ; 今日观看: ${stats.videoCount} 条`;
-    // 保存每日统计
+    var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(2) : '--';
+    var fin = finalBalance !== '--' ? finalBalance.toFixed(2) : '--';
+    var line1 = '初始金币: ' + ini + ' ; 最新金币: ' + fin;
+    var line2 = '今日签到: ' + stats.checkInCount + ' 次    ; 今日观看: ' + stats.videoCount + ' 条';
+    // 保存统计
     store.dailyStats[acc.id] = stats;
     saveStore(store);
-    return `${line1}\n${line2}`;
-  }).catch(err => {
-    const ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(2) : '--';
-    const line1 = `初始金币: ${ini} ; 最新金币: --`;
-    const line2 = `今日签到: ${stats.checkInCount} 次    ; 今日观看: ${stats.videoCount} 条`;
-    // 即使异常也保存已有统计
+    return line1 + '\n' + line2;
+  }).catch(function(err) {
+    var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(2) : '--';
+    var line1 = '初始金币: ' + ini + ' ; 最新金币: --';
+    var line2 = '今日签到: ' + stats.checkInCount + ' 次    ; 今日观看: ' + stats.videoCount + ' 条';
     store.dailyStats[acc.id] = stats;
     saveStore(store);
-    return `${line1}\n${line2}`;
+    return line1 + '\n' + line2;
   });
 }
 
-// -------------------- 主流程 --------------------
+// ==================== 主流程 ====================
 if (typeof $request !== 'undefined' && $request) {
-  // ----- 抓包模式 -----
-  const paramsRaw = parseRawQuery($request.url);
-  const headersMap = normalizeHeaderNameMap($request.headers || {});
-  let baseUA = '';
-  Object.keys(headersMap).forEach(k => { if (k.toLowerCase() === 'user-agent') baseUA = headersMap[k]; });
+  // 抓包模式
+  var paramsRaw = parseRawQuery($request.url);
+  var headersMap = normalizeHeaderNameMap($request.headers || {});
+  var baseUA = '';
+  var hKeys = Object.keys(headersMap);
+  for (var i = 0; i < hKeys.length; i++) {
+    if (hKeys[i].toLowerCase() === 'user-agent') baseUA = headersMap[hKeys[i]];
+  }
 
-  const store = loadStore();
-  const fp = fingerprintOf(paramsRaw);
-  const now = Date.now();
-  const existed = !!store.accounts[fp];
-  const uaSeed = existed ? store.accounts[fp].uaSeed : store.order.length;
-  const alias = existed ? store.accounts[fp].alias : `账号${store.order.length + 1}`;
+  var store = loadStore();
+  var fp = fingerprintOf(paramsRaw);
+  var nowTime = Date.now();
+  var existed = !!store.accounts[fp];
+  var uaSeed = existed ? store.accounts[fp].uaSeed : store.order.length;
+  var alias = existed ? store.accounts[fp].alias : '账号' + (store.order.length + 1);
 
   store.accounts[fp] = {
     id: fp,
-    alias,
-    uaSeed,
-    baseUA,
-    capture: { url: $request.url, paramsRaw, headers: headersMap },
-    createdAt: existed ? store.accounts[fp].createdAt : now,
-    updatedAt: now
+    alias: alias,
+    uaSeed: uaSeed,
+    baseUA: baseUA,
+    capture: { url: $request.url, paramsRaw: paramsRaw, headers: headersMap },
+    createdAt: existed ? store.accounts[fp].createdAt : nowTime,
+    updatedAt: nowTime
   };
   if (!existed) store.order.push(fp);
   saveStore(store);
 
-  const total = store.order.length;
-  notify(existed ? '账号参数已更新' : '新账号已入库', `${alias}（id:${fp}）\n当前账号总数：${total}`);
+  var total = store.order.length;
+  notify(existed ? '账号参数已更新' : '新账号已入库', alias + '（id:' + fp + '）\n当前账号总数：' + total);
   $done({});
 } else {
-  // ----- 定时任务模式 -----
-  const store = loadStore();
-  const ids = store.order.filter(id => store.accounts[id]);
+  // 定时任务模式
+  var store = loadStore();
+  var ids = store.order.filter(function(id) { return store.accounts[id]; });
   if (!ids.length) {
     notify('未抓到任何账号', '请先打开 WeTalk 触发抓包');
     $done();
   } else {
-    const total = ids.length;
-    const results = [];
-    let chain = Promise.resolve();
-    ids.forEach((id, idx) => {
-      chain = chain.then(() => runAccount(store.accounts[id], store))
-        .then(text => { results.push(text); })
-        .then(() => idx < ids.length - 1 ? sleep(ACCOUNT_GAP) : null);
+    var total = ids.length;
+    var results = [];
+    var chain = Promise.resolve();
+    ids.forEach(function(id, idx) {
+      chain = chain.then(function() {
+        return runAccount(store.accounts[id], store);
+      }).then(function(text) {
+        results.push(text);
+        if (idx < ids.length - 1) {
+          return sleep(ACCOUNT_GAP);
+        }
+      });
     });
-    chain.then(() => {
-      notify(`全部完成 (${total}个账号)`, results.join('\n———\n'));
+    chain.then(function() {
+      notify('全部完成 (' + total + '个账号)', results.join('\n———\n'));
       $done();
-    }).catch(err => {
-      notify(`执行异常 (${total}个账号)`, results.join('\n———\n') + '\n' + (err.error || String(err)));
+    }).catch(function(err) {
+      notify('执行异常 (' + total + '个账号)', results.join('\n———\n') + '\n' + (err.error || String(err)));
       $done();
     });
   }
 }
-```
-
----
-
-改动说明
-
-1. 去掉了账号标签行 — 每个账号只输出两行数据。
-2. 余额合并 — 初始金币与最新金币合并为一行，分号分隔。
-3. 签到/视频累计 — 引入 dailyStats 按自然日记录当日签到次数和视频次数，跨多次执行自动累加。
-4. 格式对齐 — 使用固定空格分隔，分号列基本对齐（受字体影响，逻辑上已对齐）。
-5. 去除所有 emoji — 通知标题和内容均无表情符号。
-6. 保留原始 MD5 — 未做裁剪，确保签名方式与原有逻辑一致。
-
-直接替换你的 Quantumult X 脚本即可。
