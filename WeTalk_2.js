@@ -1,7 +1,7 @@
 /*
 @Name：WeTalk 自动化签到+视频奖励
 @Author：TG@ZenMoFiShi
-@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容版)
+@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容最终版)
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js
 [task_local]
@@ -271,7 +271,7 @@ function sleep(ms) {
 
 // ==================== 单账号执行（核心） ====================
 function runAccount(acc, store) {
-  // padRight 用于补齐空格
+  // 补空格函数
   function padRight(str, len) {
     str = String(str);
     while (str.length < len) str += ' ';
@@ -300,6 +300,7 @@ function runAccount(acc, store) {
     }
   }
 
+  // 1. 查初始余额
   return fetchApi('queryBalanceAndBonus').then(function(res) {
     var d = parseBody(res);
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
@@ -316,10 +317,13 @@ function runAccount(acc, store) {
         stats.checkInCount++;
       }
     }
+    // 2. 领视频奖励（遇到上限立即停止）
     var p = Promise.resolve();
+    var videoLimitReached = false;
     for (var i = 0; i < MAX_VIDEO; i++) {
       (function(idx) {
         p = p.then(function() {
+          if (videoLimitReached) return;
           return new Promise(function(resolve) {
             setTimeout(function() {
               resolve(fetchApi('videoBonus').then(function(res) {
@@ -330,7 +334,11 @@ function runAccount(acc, store) {
                   var notLimited = msg.indexOf('次数过多') === -1 && msg.indexOf('明天再试') === -1;
                   if (hasBonus && notLimited) {
                     stats.videoCount++;
+                  } else {
+                    videoLimitReached = true;
                   }
+                } else {
+                  videoLimitReached = true;
                 }
               }));
             }, idx === 0 ? 1500 : VIDEO_DELAY);
@@ -350,14 +358,14 @@ function runAccount(acc, store) {
     var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
     var fin = finalBalance !== '--' ? finalBalance.toFixed(3) : '--';
 
-    // 动态对齐：计算左半部分长度，较短者补足空格，且数值与分号间加一个空格
-    var leftCoin = '初始金币: ' + ini + ' ';  // 注意后面先加一个空格再拼分号
+    // 动态对齐，数值后留一个空格再接分号
+    var leftCoin = '初始金币: ' + ini + ' ';
     var leftSign = '今日签到: ' + stats.checkInCount + ' 次 ';
     var maxLen = Math.max(leftCoin.length, leftSign.length);
     leftCoin = padRight(leftCoin, maxLen);
     leftSign = padRight(leftSign, maxLen);
-    var line1 = leftCoin + '；最新金币: ' + fin;
-    var line2 = leftSign + '；今日观看: ' + stats.videoCount + ' 条'；
+    var line1 = leftCoin + '; 最新金币: ' + fin;
+    var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
 
     store.dailyStats[acc.id] = stats;
     saveStore(store);
@@ -369,8 +377,8 @@ function runAccount(acc, store) {
     var maxLen = Math.max(leftCoin.length, leftSign.length);
     leftCoin = padRight(leftCoin, maxLen);
     leftSign = padRight(leftSign, maxLen);
-    var line1 = leftCoin + '；最新金币: --';
-    var line2 = leftSign + '；今日观看: ' + stats.videoCount + ' 条'；
+    var line1 = leftCoin + '; 最新金币: --';
+    var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
 
     store.dailyStats[acc.id] = stats;
     saveStore(store);
@@ -380,6 +388,7 @@ function runAccount(acc, store) {
 
 // ==================== 主流程 ====================
 if (typeof $request !== 'undefined' && $request) {
+  // 抓包模式
   var paramsRaw = parseRawQuery($request.url);
   var headersMap = normalizeHeaderNameMap($request.headers || {});
   var baseUA = '';
@@ -411,6 +420,7 @@ if (typeof $request !== 'undefined' && $request) {
   notify(existed ? '账号参数已更新' : '新账号已入库', alias + '（id:' + fp + '）\n当前账号总数：' + total);
   $done({});
 } else {
+  // 定时任务模式
   var store = loadStore();
   var ids = [];
   var order = store.order;
