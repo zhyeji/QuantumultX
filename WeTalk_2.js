@@ -417,7 +417,7 @@ if (typeof $request !== 'undefined' && $request) {
   saveStore(store);
 
   var total = store.order.length;
-    // notify(existed ? '账号参数已更新' : '新账号已入库', alias + '（id:' + fp + '）\n当前账号总数：' + total);
+  // notify(existed ? '账号参数已更新' : '新账号已入库', alias + '（id:' + fp + '）\n当前账号总数：' + total);
   $done({});
 } else {
   // 定时任务模式
