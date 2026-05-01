@@ -1,2 +1,4 @@
 # QuantumultX
-圈X相关的
+
+https://raw.githubusercontent.com/zhyeji/QuantumultX/main/～
+
