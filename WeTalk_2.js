@@ -582,7 +582,7 @@ if (typeof $request !== 'undefined' && $request) {
     var total = ids.length;
     var results = [];
     // 判断触发方式：手动运行时 $trigger 存在且不是自动触发（通常为空字符串或 'button'）
-    var isManual = (typeof $trigger !== 'undefined' && $trigger !== 'time');
+    var isManual = (typeof $trigger === 'undefined' || $trigger === '');     
     var chain = Promise.resolve();
     for (var idx = 0; idx < ids.length; idx++) {
       (function(index) {
