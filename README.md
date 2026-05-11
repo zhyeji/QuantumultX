@@ -1,4 +1,4 @@
 # QuantumultX
 
-https://raw.githubusercontent.com/zhyeji/QuantumultX/main/～
+https://raw.githubusercontent.com/zhyeji/QuantumultX/main/
 
