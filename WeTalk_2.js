@@ -374,6 +374,7 @@ function runAccount(acc, store, forceNotify) {
     var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
 
     // 通知逻辑
+    notify(acc.alias || acc.id, 'checkIn:' + stats.checkInCount + ' video:' + stats.videoCount + ' chiNotified:' + stats.checkInNotified + ' vidNotified:' + stats.videoFirstNotified + ' force:' + (forceNotify ? 1 : 0));     
     var shouldNotify = false;
     if (forceNotify) {
       shouldNotify = true;
