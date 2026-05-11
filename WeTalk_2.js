@@ -2,10 +2,8 @@
 @Name：WeTalk 自动化签到+视频奖励
 @Author：TG@ZenMoFiShi
 @Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容最终版)
-       • 第一次签到成功时通知
-       • 第一次视频奖励成功时通知
-       • 今日观看数≥25时通知
-       • 其余时间静默统计
+       • 手动运行：每个账号都弹出通知
+       • 定时运行：首次签到成功 / 首次视频奖励成功 / 今日观看数≥25 时通知，其余静默
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js
 [task_local]
@@ -273,7 +271,7 @@ function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// ==================== 单账号执行（核心） ====================
+// ==================== 单账号执行（定时模式，条件通知） ====================
 function runAccount(acc, store) {
   function padRight(str, len) {
     str = String(str);
@@ -305,7 +303,6 @@ function runAccount(acc, store) {
     }
   }
 
-  // 1. 查初始余额
   return fetchApi('queryBalanceAndBonus').then(function(res) {
     var d = parseBody(res);
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
@@ -320,13 +317,11 @@ function runAccount(acc, store) {
       var isNewCheckIn = msg.indexOf('已经签过') === -1 && msg.indexOf('明天再试') === -1;
       if (hasReward || isNewCheckIn) {
         stats.checkInCount++;
-        // 今日签到第一次达到 1 时，标记已通知
         if (stats.checkInCount === 1 && !stats.checkInNotified) {
           stats.checkInNotified = true;
         }
       }
     }
-    // 2. 领视频奖励（遇到上限立即停止）
     var p = Promise.resolve();
     var videoLimitReached = false;
     for (var i = 0; i < MAX_VIDEO; i++) {
@@ -343,7 +338,6 @@ function runAccount(acc, store) {
                   var notLimited = msg.indexOf('次数过多') === -1 && msg.indexOf('明天再试') === -1;
                   if (hasBonus && notLimited) {
                     stats.videoCount++;
-                    // 今日观看第一次达到 1 时，标记已通知
                     if (stats.videoCount === 1 && !stats.videoFirstNotified) {
                       stats.videoFirstNotified = true;
                     }
@@ -382,7 +376,7 @@ function runAccount(acc, store) {
     store.dailyStats[acc.id] = stats;
     saveStore(store);
 
-    // 通知条件：首次签到达到1 或 首次观看达到1 或 观看≥25
+    // 定时模式下条件通知
     if ((stats.checkInCount === 1 && stats.checkInNotified === true) ||
         (stats.videoCount === 1 && stats.videoFirstNotified === true) ||
         stats.videoCount >= 25) {
@@ -402,7 +396,7 @@ function runAccount(acc, store) {
 
     store.dailyStats[acc.id] = stats;
     saveStore(store);
-    // 异常时也遵循相同通知条件
+    // 异常时也遵循条件
     if ((stats.checkInCount === 1 && stats.checkInNotified === true) ||
         (stats.videoCount === 1 && stats.videoFirstNotified === true) ||
         stats.videoCount >= 25) {
@@ -410,6 +404,129 @@ function runAccount(acc, store) {
     } else {
       return '';
     }
+  });
+}
+
+// ==================== 单账号执行（手动模式，强制通知） ====================
+function runAccountForce(acc, store) {
+  function padRight(str, len) {
+    str = String(str);
+    while (str.length < len) str += ' ';
+    return str;
+  }
+
+  var now = new Date();
+  var today = now.getFullYear() + '/' + (now.getMonth() + 1) + '/' + now.getDate();
+  var stats = store.dailyStats[acc.id];
+  if (!stats || stats.date !== today) {
+    stats = { date: today, checkInCount: 0, videoCount: 0, initialBalance: null, checkInNotified: false, videoFirstNotified: false };
+  }
+  if (stats.checkInNotified === undefined) stats.checkInNotified = false;
+  if (stats.videoFirstNotified === undefined) stats.videoFirstNotified = false;
+
+  var ua = buildUA(acc.baseUA, acc.uaSeed);
+  var headers = buildHeaders(acc.capture, ua);
+
+  function fetchApi(path) {
+    return $task.fetch({ url: buildUrl(path, acc.capture), method: 'GET', headers: headers });
+  }
+
+  function parseBody(res) {
+    try {
+      return JSON.parse(res.body);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  return fetchApi('queryBalanceAndBonus').then(function(res) {
+    var d = parseBody(res);
+    if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
+      stats.initialBalance = Number(d.result.balance);
+    }
+    return fetchApi('checkIn');
+  }).then(function(res) {
+    var d = parseBody(res);
+    if (d && d.retcode === 0) {
+      var hasReward = d.result && (d.result.bonus !== undefined || d.result.bonusHint !== undefined);
+      var msg = d.retmsg || '';
+      var isNewCheckIn = msg.indexOf('已经签过') === -1 && msg.indexOf('明天再试') === -1;
+      if (hasReward || isNewCheckIn) {
+        stats.checkInCount++;
+        if (stats.checkInCount === 1 && !stats.checkInNotified) {
+          stats.checkInNotified = true;
+        }
+      }
+    }
+    var p = Promise.resolve();
+    var videoLimitReached = false;
+    for (var i = 0; i < MAX_VIDEO; i++) {
+      (function(idx) {
+        p = p.then(function() {
+          if (videoLimitReached) return;
+          return new Promise(function(resolve) {
+            setTimeout(function() {
+              resolve(fetchApi('videoBonus').then(function(res) {
+                var d = parseBody(res);
+                if (d && d.retcode === 0) {
+                  var hasBonus = d.result && d.result.bonus !== undefined && Number(d.result.bonus) > 0;
+                  var msg = d.retmsg || '';
+                  var notLimited = msg.indexOf('次数过多') === -1 && msg.indexOf('明天再试') === -1;
+                  if (hasBonus && notLimited) {
+                    stats.videoCount++;
+                    if (stats.videoCount === 1 && !stats.videoFirstNotified) {
+                      stats.videoFirstNotified = true;
+                    }
+                  } else {
+                    videoLimitReached = true;
+                  }
+                } else {
+                  videoLimitReached = true;
+                }
+              }));
+            }, idx === 0 ? 1500 : VIDEO_DELAY);
+          });
+        });
+      })(i);
+    }
+    return p;
+  }).then(function() {
+    return fetchApi('queryBalanceAndBonus');
+  }).then(function(res) {
+    var finalBalance = '--';
+    var d = parseBody(res);
+    if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
+      finalBalance = Number(d.result.balance);
+    }
+    var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
+    var fin = finalBalance !== '--' ? finalBalance.toFixed(3) : '--';
+
+    var leftCoin = '初始金币: ' + ini + ' ';
+    var leftSign = '今日签到: ' + stats.checkInCount + ' 次 ';
+    var maxLen = Math.max(leftCoin.length, leftSign.length);
+    leftCoin = padRight(leftCoin, maxLen);
+    leftSign = padRight(leftSign, maxLen);
+    var line1 = leftCoin + '; 最新金币: ' + fin;
+    var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
+
+    store.dailyStats[acc.id] = stats;
+    saveStore(store);
+    // 手动模式：强制返回结果
+    return line1 + '\n' + line2;
+  }).catch(function(err) {
+    var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
+    var leftCoin = '初始金币: ' + ini + ' ';
+    var leftSign = '今日签到: ' + stats.checkInCount + ' 次 ';
+    var maxLen = Math.max(leftCoin.length, leftSign.length);
+    leftCoin = padRight(leftCoin, maxLen);
+    leftSign = padRight(leftSign, maxLen);
+    var line1 = leftCoin + '; 最新金币: --';
+    var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
+
+    store.dailyStats[acc.id] = stats;
+    saveStore(store);
+    // 手动模式：强制返回结果
+    return line1 + '\n' + line2;
   });
 }
 
@@ -450,7 +567,7 @@ if (typeof $request !== 'undefined' && $request) {
   }
   $done({});
 } else {
-  // 定时任务模式
+  // 定时任务 / 手动运行模式
   var store = loadStore();
   var ids = [];
   var order = store.order;
@@ -464,11 +581,17 @@ if (typeof $request !== 'undefined' && $request) {
   } else {
     var total = ids.length;
     var results = [];
+    // 判断触发方式：手动运行时 $trigger 存在且不是自动触发（通常为空字符串或 'button'）
+    var isManual = (typeof $trigger !== 'undefined' && $trigger !== 'time');
     var chain = Promise.resolve();
     for (var idx = 0; idx < ids.length; idx++) {
       (function(index) {
         chain = chain.then(function() {
-          return runAccount(store.accounts[ids[index]], store);
+          if (isManual) {
+            return runAccountForce(store.accounts[ids[index]], store);
+          } else {
+            return runAccount(store.accounts[ids[index]], store);
+          }
         }).then(function(text) {
           results.push(text);
           if (index < ids.length - 1) {
@@ -478,7 +601,7 @@ if (typeof $request !== 'undefined' && $request) {
       })(idx);
     }
     chain.then(function() {
-      // 过滤掉空字符串（不需要通知的结果）
+      // 过滤掉空字符串（定时模式下无通知条件时会产生空结果）
       var validResults = [];
       for (var r = 0; r < results.length; r++) {
         if (results[r] !== '') validResults.push(results[r]);
