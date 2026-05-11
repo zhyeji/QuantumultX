@@ -1,9 +1,8 @@
 /*
-@Name：WeTalk 自动化签到+视频奖励
+@Name：WeTalk 签到-定时版
 @Author：TG@ZenMoFiShi
-@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容最终版)
-       • 手动运行：FORCE_NOTIFY 设为 true 后运行，每个账号都弹出通知
-       • 定时运行：FORCE_NOTIFY 保持 false，首次签到/首次观看当天各通知一次，观看数≥25每次均通知
+@Desc：自动签到+视频奖励，累计当日数据，格式化输出 (ES5 兼容定时版)
+       首次签到成功 / 首次视频奖励成功 / 今日观看数≥25 时通知，其余静默
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js
 [task_local]
@@ -19,11 +18,6 @@ var API_HOST = 'api.wetalkapp.com';
 var MAX_VIDEO = 5;
 var VIDEO_DELAY = 8000;
 var ACCOUNT_GAP = 3500;
-
-// ==================== 手动/定时通知开关 ====================
-// false = 定时模式（条件通知）  true = 手动模式（强制通知）
-// 平时定时运行时保持 false，想看完整结果时改成 true 手动执行一次，用完改回 false
-var FORCE_NOTIFY = false;
 
 var IOS_VERSIONS = ['17.5.1','17.6.1','17.4.1','17.2.1','16.7.8','17.6','17.3.1','18.0.1','17.1.2','16.6.1'];
 var IOS_SCALES = ['2.00','3.00','3.00','2.00','3.00'];
@@ -276,8 +270,8 @@ function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// ==================== 单账号执行 ====================
-function runAccount(acc, store, forceNotify) {
+// ==================== 单账号执行（定时专用，条件通知） ====================
+function runAccount(acc, store) {
   function padRight(str, len) {
     str = String(str);
     while (str.length < len) str += ' ';
@@ -378,20 +372,16 @@ function runAccount(acc, store, forceNotify) {
     var line1 = leftCoin + '; 最新金币: ' + fin;
     var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
 
-    // 通知逻辑
+    // 定时模式条件通知
     var shouldNotify = false;
-    if (forceNotify) {
-      shouldNotify = true; // 手动模式强制通知
-    } else {
-      if (stats.videoCount >= 25) {
-        shouldNotify = true; // 每次定时均通知
-      } else if (stats.checkInCount === 1 && stats.checkInNotified === true) {
-        shouldNotify = true;
-        stats.checkInNotified = false; // 通知后当天不再触发
-      } else if (stats.videoCount === 1 && stats.videoFirstNotified === true) {
-        shouldNotify = true;
-        stats.videoFirstNotified = false;
-      }
+    if (stats.videoCount >= 25) {
+      shouldNotify = true;
+    } else if (stats.checkInCount === 1 && stats.checkInNotified === true) {
+      shouldNotify = true;
+      stats.checkInNotified = false;
+    } else if (stats.videoCount === 1 && stats.videoFirstNotified === true) {
+      shouldNotify = true;
+      stats.videoFirstNotified = false;
     }
 
     store.dailyStats[acc.id] = stats;
@@ -412,18 +402,14 @@ function runAccount(acc, store, forceNotify) {
     var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
 
     var shouldNotify = false;
-    if (forceNotify) {
+    if (stats.videoCount >= 25) {
       shouldNotify = true;
-    } else {
-      if (stats.videoCount >= 25) {
-        shouldNotify = true;
-      } else if (stats.checkInCount === 1 && stats.checkInNotified === true) {
-        shouldNotify = true;
-        stats.checkInNotified = false;
-      } else if (stats.videoCount === 1 && stats.videoFirstNotified === true) {
-        shouldNotify = true;
-        stats.videoFirstNotified = false;
-      }
+    } else if (stats.checkInCount === 1 && stats.checkInNotified === true) {
+      shouldNotify = true;
+      stats.checkInNotified = false;
+    } else if (stats.videoCount === 1 && stats.videoFirstNotified === true) {
+      shouldNotify = true;
+      stats.videoFirstNotified = false;
     }
 
     store.dailyStats[acc.id] = stats;
@@ -472,7 +458,7 @@ if (typeof $request !== 'undefined' && $request) {
   }
   $done({});
 } else {
-  // 定时任务 / 手动运行
+  // 定时任务模式
   var store = loadStore();
   var ids = [];
   var order = store.order;
@@ -486,12 +472,11 @@ if (typeof $request !== 'undefined' && $request) {
   } else {
     var total = ids.length;
     var results = [];
-    var isManual = FORCE_NOTIFY; // 直接使用开关变量
     var chain = Promise.resolve();
     for (var idx = 0; idx < ids.length; idx++) {
       (function(index) {
         chain = chain.then(function() {
-          return runAccount(store.accounts[ids[index]], store, isManual);
+          return runAccount(store.accounts[ids[index]], store);
         }).then(function(text) {
           results.push(text);
           if (index < ids.length - 1) {
