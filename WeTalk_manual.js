@@ -3,11 +3,7 @@
 @Author：TG@ZenMoFiShi
 @Desc：手动运行专用，每个账号都弹出完整通知
        不设定时任务，仅供手动触发查看当前数据
-[rewrite_local]
-^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_Manual.js
-[MITM]
-hostname = api.wetalkapp.com
-*/
+
 
 var scriptName = 'WeTalk';
 var storeKey = 'wetalk_accounts_v1';
