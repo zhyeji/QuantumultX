@@ -4,7 +4,13 @@
 @Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容定时版)
        首次签到成功 / 首次视频奖励成功 / 今日观看数≥25 时通知
        观看≥25每次通知，观看=30或31时停止通知
-
+[rewrite_local]
+^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_auto.js
+[task_local]
+* * * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_auto.js, tag=WeTalk签到_自动, enabled=true
+[MITM]
+hostname = api.wetalkapp.com
+*/
 
 var scriptName = 'WeTalk';
 var storeKey = 'wetalk_accounts_v1';
