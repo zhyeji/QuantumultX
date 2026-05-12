@@ -1,8 +1,9 @@
 /*
 @Name：WeTalk 签到-定时版
 @Author：TG@ZenMoFiShi
-@Desc：自动签到+视频奖励，累计当日数据，格式化输出 (ES5 兼容定时版)
-       首次签到成功 / 首次视频奖励成功 / 今日观看数≥25 时通知，其余静默
+@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容定时版)
+       首次签到成功 / 首次视频奖励成功 / 今日观看数≥25 时通知
+       观看≥25每次通知，观看=30或31时停止通知
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js
 [task_local]
@@ -270,7 +271,7 @@ function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// ==================== 单账号执行（定时专用，条件通知） ====================
+// ==================== 单账号执行（定时专用，条件通知）====================
 function runAccount(acc, store) {
   function padRight(str, len) {
     str = String(str);
@@ -372,16 +373,26 @@ function runAccount(acc, store) {
     var line1 = leftCoin + '; 最新金币: ' + fin;
     var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
 
-    // 定时模式条件通知
+    // 定时模式条件通知（独立 if，非互斥）
     var shouldNotify = false;
-    if (stats.videoCount >= 25) {
-      shouldNotify = true;
-    } else if (stats.checkInCount === 1 && stats.checkInNotified === true) {
+
+    // 首次签到通知
+    if (stats.checkInCount === 1 && stats.checkInNotified === true) {
       shouldNotify = true;
       stats.checkInNotified = false;
-    } else if (stats.videoCount === 1 && stats.videoFirstNotified === true) {
+    }
+    // 首次观看通知
+    if (stats.videoCount === 1 && stats.videoFirstNotified === true) {
       shouldNotify = true;
       stats.videoFirstNotified = false;
+    }
+    // 观看≥25每次通知
+    if (stats.videoCount >= 25) {
+      shouldNotify = true;
+    }
+    // 观看=30或31时停止通知
+    if (stats.videoCount === 30 || stats.videoCount === 31) {
+      shouldNotify = false;
     }
 
     store.dailyStats[acc.id] = stats;
@@ -402,14 +413,19 @@ function runAccount(acc, store) {
     var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
 
     var shouldNotify = false;
-    if (stats.videoCount >= 25) {
-      shouldNotify = true;
-    } else if (stats.checkInCount === 1 && stats.checkInNotified === true) {
+    if (stats.checkInCount === 1 && stats.checkInNotified === true) {
       shouldNotify = true;
       stats.checkInNotified = false;
-    } else if (stats.videoCount === 1 && stats.videoFirstNotified === true) {
+    }
+    if (stats.videoCount === 1 && stats.videoFirstNotified === true) {
       shouldNotify = true;
       stats.videoFirstNotified = false;
+    }
+    if (stats.videoCount >= 25) {
+      shouldNotify = true;
+    }
+    if (stats.videoCount === 30 || stats.videoCount === 31) {
+      shouldNotify = false;
     }
 
     store.dailyStats[acc.id] = stats;
