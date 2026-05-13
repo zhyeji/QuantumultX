@@ -7,7 +7,7 @@
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_auto.js
 [task_local]
-* * * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_auto.js, tag=WeTalk签到, enabled=true
+* * * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_auto.js, tag=WeTalk签到_自动, enabled=true
 [MITM]
 hostname = api.wetalkapp.com
 */
