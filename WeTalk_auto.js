@@ -5,7 +5,7 @@
        首次签到成功 / 首次视频奖励成功 / 今日观看数≥25 时通知
        观看≥25每次通知，观看=30或31时停止通知
 [rewrite_local]
-^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk.js
+^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_auto.js
 [task_local]
 * * * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_auto.js, tag=WeTalk签到, enabled=true
 [MITM]
