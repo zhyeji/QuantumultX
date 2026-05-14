@@ -1,6 +1,5 @@
 /*
 @Name：WeTalk 自动化签到+视频奖励
-@Author：TG@ZenMoFiShi
 @Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容最终版)
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_2.js
