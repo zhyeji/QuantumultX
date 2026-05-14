@@ -4,9 +4,9 @@
        定时运行：金币有增长才弹窗，无增长不弹，异常时弹窗
        手动运行：只查余额，不签到不领视频，始终弹窗
 [rewrite_local]
-^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_2.js
+^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js
 [task_local]
-* * * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_2.js, tag=WeTalk签到, enabled=true
+* * * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js, tag=WeTalk签到, enabled=true
 [MITM]
 hostname = api.wetalkapp.com
 */
