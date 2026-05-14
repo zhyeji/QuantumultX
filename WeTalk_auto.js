@@ -337,10 +337,11 @@ function runAccount(acc, store) {
                   var msg = d.retmsg || '';
                   var notLimited = msg.indexOf('次数过多') === -1 && msg.indexOf('明天再试') === -1;
                   if (hasBonus && notLimited) {
-                    stats.videoCount++;
-                    if (stats.videoCount === 1 && !stats.videoFirstNotified) {
+                    // ★ 修复：首次成功观看时立即标记
+                    if (stats.videoCount === 0) {
                       stats.videoFirstNotified = true;
                     }
+                    stats.videoCount++;
                   } else {
                     videoLimitReached = true;
                   }
@@ -381,8 +382,8 @@ function runAccount(acc, store) {
       shouldNotify = true;
       stats.checkInNotified = false;
     }
-    // 首次观看通知
-    if (stats.videoCount === 1 && stats.videoFirstNotified === true) {
+    // ★ 修复：首次观看通知（只要标记位为 true 就触发）
+    if (stats.videoFirstNotified === true) {
       shouldNotify = true;
       stats.videoFirstNotified = false;
     }
@@ -417,7 +418,8 @@ function runAccount(acc, store) {
       shouldNotify = true;
       stats.checkInNotified = false;
     }
-    if (stats.videoCount === 1 && stats.videoFirstNotified === true) {
+    // ★ 修复：异常流程也改
+    if (stats.videoFirstNotified === true) {
       shouldNotify = true;
       stats.videoFirstNotified = false;
     }
