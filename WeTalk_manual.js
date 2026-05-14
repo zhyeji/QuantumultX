@@ -1,7 +1,7 @@
 /*
 @Name：WeTalk 签到-手动版
 @Author：TG@ZenMoFiShi
-@Desc：手动运行专用，每个账号都弹出完整通知
+@Desc：手动运行专用，只读当前数据，不参与签到和视频奖励
        不设定时任务，仅供手动触发查看当前数据
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_manual.js
@@ -268,7 +268,7 @@ function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// ==================== 单账号执行（手动专用，强制通知） ====================
+// ==================== 单账号执行（手动专用，只读数据）====================
 function runAccount(acc, store) {
   function padRight(str, len) {
     str = String(str);
@@ -276,104 +276,49 @@ function runAccount(acc, store) {
     return str;
   }
 
-  var now = new Date();
-  var today = now.getFullYear() + '/' + (now.getMonth() + 1) + '/' + now.getDate();
   var stats = store.dailyStats[acc.id];
-  if (!stats || stats.date !== today) {
-    stats = { date: today, checkInCount: 0, videoCount: 0, initialBalance: null };
+  var ini = '--';
+  if (stats && stats.initialBalance !== null && stats.initialBalance !== undefined) {
+    ini = Number(stats.initialBalance).toFixed(3);
   }
 
-  var ua = buildUA(acc.baseUA, acc.uaSeed);
-  var headers = buildHeaders(acc.capture, ua);
-
-  function fetchApi(path) {
-    return $task.fetch({ url: buildUrl(path, acc.capture), method: 'GET', headers: headers });
-  }
-
-  function parseBody(res) {
-    try {
-      return JSON.parse(res.body);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  return fetchApi('queryBalanceAndBonus').then(function(res) {
-    var d = parseBody(res);
-    if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
-      stats.initialBalance = Number(d.result.balance);
-    }
-    return fetchApi('checkIn');
-  }).then(function(res) {
-    var d = parseBody(res);
-    if (d && d.retcode === 0) {
-      var hasReward = d.result && (d.result.bonus !== undefined || d.result.bonusHint !== undefined);
-      var msg = d.retmsg || '';
-      var isNewCheckIn = msg.indexOf('已经签过') === -1 && msg.indexOf('明天再试') === -1;
-      if (hasReward || isNewCheckIn) {
-        stats.checkInCount++;
-      }
-    }
-    var p = Promise.resolve();
-    var videoLimitReached = false;
-    for (var i = 0; i < MAX_VIDEO; i++) {
-      (function(idx) {
-        p = p.then(function() {
-          if (videoLimitReached) return;
-          return new Promise(function(resolve) {
-            setTimeout(function() {
-              resolve(fetchApi('videoBonus').then(function(res) {
-                var d = parseBody(res);
-                if (d && d.retcode === 0) {
-                  var hasBonus = d.result && d.result.bonus !== undefined && Number(d.result.bonus) > 0;
-                  var msg = d.retmsg || '';
-                  var notLimited = msg.indexOf('次数过多') === -1 && msg.indexOf('明天再试') === -1;
-                  if (hasBonus && notLimited) {
-                    stats.videoCount++;
-                  } else {
-                    videoLimitReached = true;
-                  }
-                } else {
-                  videoLimitReached = true;
-                }
-              }));
-            }, idx === 0 ? 1500 : VIDEO_DELAY);
-          });
-        });
-      })(i);
-    }
-    return p;
-  }).then(function() {
-    return fetchApi('queryBalanceAndBonus');
+  // 只查询最新余额，不参与签到和视频奖励
+  return $task.fetch({
+    url: buildUrl('queryBalanceAndBonus', acc.capture),
+    method: 'GET',
+    headers: buildHeaders(acc.capture, buildUA(acc.baseUA, acc.uaSeed))
   }).then(function(res) {
     var finalBalance = '--';
-    var d = parseBody(res);
-    if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
-      finalBalance = Number(d.result.balance);
-    }
-    var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
+    try {
+      var d = JSON.parse(res.body);
+      if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
+        finalBalance = Number(d.result.balance);
+      }
+    } catch (e) {}
+
     var fin = finalBalance !== '--' ? finalBalance.toFixed(3) : '--';
+    var checkIn = (stats && stats.checkInCount !== undefined) ? stats.checkInCount : 0;
+    var video = (stats && stats.videoCount !== undefined) ? stats.videoCount : 0;
 
     var leftCoin = '初始金币: ' + ini + ' ';
-    var leftSign = '今日签到: ' + stats.checkInCount + ' 次 ';
+    var leftSign = '今日签到: ' + checkIn + ' 次 ';
     var maxLen = Math.max(leftCoin.length, leftSign.length);
     leftCoin = padRight(leftCoin, maxLen);
     leftSign = padRight(leftSign, maxLen);
     var line1 = leftCoin + '; 最新金币: ' + fin;
-    var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
+    var line2 = leftSign + '; 今日观看: ' + video + ' 条';
 
-    // 手动模式始终通知
     return line1 + '\n' + line2;
-  }).catch(function(err) {
-    var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
+  }).catch(function() {
+    var checkIn = (stats && stats.checkInCount !== undefined) ? stats.checkInCount : 0;
+    var video = (stats && stats.videoCount !== undefined) ? stats.videoCount : 0;
     var leftCoin = '初始金币: ' + ini + ' ';
-    var leftSign = '今日签到: ' + stats.checkInCount + ' 次 ';
+    var leftSign = '今日签到: ' + checkIn + ' 次 ';
     var maxLen = Math.max(leftCoin.length, leftSign.length);
     leftCoin = padRight(leftCoin, maxLen);
     leftSign = padRight(leftSign, maxLen);
     var line1 = leftCoin + '; 最新金币: --';
-    var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
-
+    var line2 = leftSign + '; 今日观看: ' + video + ' 条';
     return line1 + '\n' + line2;
   });
 }
