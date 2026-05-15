@@ -274,9 +274,8 @@ function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// ==================== 单账号执行（核心） ====================
+// ==================== 单账号执行（核心，内部直接弹通知） ====================
 function runAccount(acc, store, forceNotify) {
-  // 补空格函数
   function padRight(str, len) {
     str = String(str);
     while (str.length < len) str += ' ';
@@ -306,8 +305,7 @@ function runAccount(acc, store, forceNotify) {
     }
   }
 
-  // 组装格式化输出
-  function formatResult(finalBalance) {
+  function formatAndNotify(finalBalance) {
     var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
     var fin = finalBalance !== null ? finalBalance.toFixed(3) : '--';
     var leftCoin = '初始金币: ' + ini + ' ';
@@ -317,17 +315,15 @@ function runAccount(acc, store, forceNotify) {
     leftSign = padRight(leftSign, maxLen);
     var line1 = leftCoin + '; 最新金币: ' + fin;
     var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
-    return line1 + '\n' + line2;
+    notify(acc.alias || acc.id, line1 + '\n' + line2);
   }
 
-  // 1. 查初始余额
   return fetchApi('queryBalanceAndBonus').then(function(res) {
     var d = parseBody(res);
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
       stats.initialBalance = Number(d.result.balance);
     }
 
-    // ★ 手动模式：只查余额，不签到、不领视频，不更新 lastBalance，始终返回结果
     if (forceNotify) {
       return fetchApi('queryBalanceAndBonus').then(function(res2) {
         var finalBalance = null;
@@ -335,16 +331,18 @@ function runAccount(acc, store, forceNotify) {
         if (d2 && d2.retcode === 0 && d2.result && d2.result.balance !== undefined) {
           finalBalance = Number(d2.result.balance);
         }
-        return formatResult(finalBalance);
+        formatAndNotify(finalBalance);
+        store.dailyStats[acc.id] = stats;
+        saveStore(store);
       }).catch(function() {
-        return formatResult(null);
+        formatAndNotify(null);
+        store.dailyStats[acc.id] = stats;
+        saveStore(store);
       });
     }
 
-    // ★ 定时模式：继续签到和视频奖励
     return fetchApi('checkIn');
   }).then(function(res) {
-    // 手动模式下这里不会执行（上面已经 return 了）
     var d = parseBody(res);
     if (d && d.retcode === 0) {
       var hasReward = d.result && (d.result.bonus !== undefined || d.result.bonusHint !== undefined);
@@ -354,7 +352,6 @@ function runAccount(acc, store, forceNotify) {
         stats.checkInCount++;
       }
     }
-    // 2. 领视频奖励（遇到上限立即停止）
     var p = Promise.resolve();
     var videoLimitReached = false;
     for (var i = 0; i < MAX_VIDEO; i++) {
@@ -385,22 +382,18 @@ function runAccount(acc, store, forceNotify) {
     }
     return p;
   }).then(function() {
-    // 手动模式下这里不会执行
     return fetchApi('queryBalanceAndBonus');
   }).then(function(res) {
-    // 手动模式下这里不会执行
     var finalBalance = null;
     var d = parseBody(res);
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
       finalBalance = Number(d.result.balance);
     }
 
-    // 判断是否通知（仅定时模式进入）
     var shouldNotify = false;
     if (stats.lastBalance === null || (finalBalance !== null && finalBalance > stats.lastBalance)) {
       shouldNotify = true;
     }
-    // 更新 lastBalance：仅在定时模式有增长时更新
     if (finalBalance !== null && (stats.lastBalance === null || finalBalance > stats.lastBalance)) {
       stats.lastBalance = finalBalance;
     }
@@ -409,22 +402,22 @@ function runAccount(acc, store, forceNotify) {
     saveStore(store);
 
     if (shouldNotify) {
-      return formatResult(finalBalance);
+      formatAndNotify(finalBalance);
     }
-    return '';
   }).catch(function(err) {
     if (forceNotify) {
-      return formatResult(null);
+      formatAndNotify(null);
+      store.dailyStats[acc.id] = stats;
+      saveStore(store);
+    } else {
+      var errMsg = (err && err.error) ? err.error : String(err);
+      notify(acc.alias || acc.id, '初始金币: -- ; 最新金币: --\n今日签到: -- 次   ; 今日观看: -- 条\n异常: ' + errMsg);
     }
-    // 定时模式异常也弹出
-    var errMsg = (err && err.error) ? err.error : String(err);
-    return formatResult(null) + '\n异常: ' + errMsg;
   });
 }
 
-// ==================== 主流程 ====================
+// ==================== 主流程（极简，不收集结果） ====================
 if (typeof $request !== 'undefined' && $request) {
-  // 抓包模式
   var paramsRaw = parseRawQuery($request.url);
   var headersMap = normalizeHeaderNameMap($request.headers || {});
   var baseUA = '';
@@ -458,7 +451,6 @@ if (typeof $request !== 'undefined' && $request) {
   }
   $done({});
 } else {
-  // 定时任务 / 手动运行模式
   var store = loadStore();
   var ids = [];
   var order = store.order;
@@ -470,34 +462,26 @@ if (typeof $request !== 'undefined' && $request) {
     notify('未抓到任何账号', '请先打开 WeTalk 触发抓包');
     $done();
   } else {
-    var total = ids.length;
-    var results = [];
     var isManual = FORCE_NOTIFY;
-    var chain = Promise.resolve();
-    for (var idx = 0; idx < ids.length; idx++) {
-      (function(index) {
-        chain = chain.then(function() {
-          return runAccount(store.accounts[ids[index]], store, isManual);
-        }).then(function(text) {
-          results.push(text);
-          if (index < ids.length - 1) {
-            return sleep(ACCOUNT_GAP);
-          }
-        });
-      })(idx);
+    var idx = 0;
+
+    function runNext() {
+      if (idx >= ids.length) {
+        $done();
+        return;
+      }
+      runAccount(store.accounts[ids[idx]], store, isManual).then(function() {
+        idx++;
+        if (idx < ids.length) {
+          sleep(ACCOUNT_GAP).then(runNext);
+        } else {
+          runNext();
+        }
+      }).catch(function() {
+        $done();
+      });
     }
-    chain.then(function() {
-      var validResults = [];
-      for (var r = 0; r < results.length; r++) {
-        if (results[r] !== '') validResults.push(results[r]);
-      }
-      if (validResults.length > 0) {
-        notify('全部完成 (' + total + '个账号)', validResults.join('\n———\n'));
-      }
-      $done();
-    }).catch(function(err) {
-      notify('执行异常 (' + total + '个账号)', (results.join('\n———\n')) + '\n' + (err.error || String(err)));
-      $done();
-    });
+
+    runNext();
   }
 }
