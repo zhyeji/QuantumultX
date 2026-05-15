@@ -327,7 +327,7 @@ function runAccount(acc, store, forceNotify) {
       stats.initialBalance = Number(d.result.balance);
     }
 
-    // ★ 手动模式：只查余额，不签到、不领视频
+    // ★ 手动模式：只查余额，不签到、不领视频，不更新 lastBalance，始终返回结果
     if (forceNotify) {
       return fetchApi('queryBalanceAndBonus').then(function(res2) {
         var finalBalance = null;
@@ -336,6 +336,8 @@ function runAccount(acc, store, forceNotify) {
           finalBalance = Number(d2.result.balance);
         }
         return formatResult(finalBalance);
+      }).catch(function() {
+        return formatResult(null);
       });
     }
 
@@ -393,11 +395,14 @@ function runAccount(acc, store, forceNotify) {
       finalBalance = Number(d.result.balance);
     }
 
-    // 判断是否通知
+    // 判断是否通知（仅定时模式进入）
     var shouldNotify = false;
     if (stats.lastBalance === null || (finalBalance !== null && finalBalance > stats.lastBalance)) {
       shouldNotify = true;
-      if (finalBalance !== null) stats.lastBalance = finalBalance;
+    }
+    // 更新 lastBalance：仅在定时模式有增长时更新
+    if (finalBalance !== null && (stats.lastBalance === null || finalBalance > stats.lastBalance)) {
+      stats.lastBalance = finalBalance;
     }
 
     store.dailyStats[acc.id] = stats;
