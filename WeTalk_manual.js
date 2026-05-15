@@ -1,9 +1,48 @@
-var scriptName = 'WeTalk调试';
+/*
+@Name：WeTalk 自动化签到+视频奖励
+@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容最终版)
+       定时运行：金币有增长才弹窗，无增长不弹，异常时弹窗
+       手动运行：只查余额，不签到不领视频，始终弹窗（带调试）
+[rewrite_local]
+^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js
+[task_local]
+* * * * * https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js, tag=WeTalk签到, enabled=true
+[MITM]
+hostname = api.wetalkapp.com
+*/
+
+var scriptName = 'WeTalk';
 var storeKey = 'wetalk_accounts_v1';
 var SECRET = '0fOiukQq7jXZV2GRi9LGlO';
 var API_HOST = 'api.wetalkapp.com';
+var MAX_VIDEO = 5;
+var VIDEO_DELAY = 8000;
+var ACCOUNT_GAP = 3500;
 
-// 只借用原来脚本的签名和请求函数，其余全部删掉
+// ==================== 手动/定时通知开关 ====================
+// false = 定时模式（有增长才通知）  true = 手动模式（始终通知，只查不操作）
+var FORCE_NOTIFY = true;
+
+var IOS_VERSIONS = ['17.5.1','17.6.1','17.4.1','17.2.1','16.7.8','17.6','17.3.1','18.0.1','17.1.2','16.6.1'];
+var IOS_SCALES = ['2.00','3.00','3.00','2.00','3.00'];
+var IPHONE_MODELS = ['iPhone14,3','iPhone13,3','iPhone15,3','iPhone16,1','iPhone14,7','iPhone13,2','iPhone15,2','iPhone12,1'];
+var CFN_VERS = ['1410.0.3','1494.0.7','1568.100.1','1209.1','1474.0.4','1568.200.2'];
+var DARWIN_VERS = ['22.6.0','23.5.0','23.6.0','24.0.0','22.4.0'];
+
+// ==================== ES5 补丁 ====================
+function padStart(str, len, pad) {
+  str = String(str);
+  while (str.length < len) str = pad + str;
+  return str;
+}
+
+function arrayFill(size, value) {
+  var arr = [];
+  for (var i = 0; i < size; i++) arr.push(value);
+  return arr;
+}
+
+// ==================== MD5 ====================
 function MD5(string) {
   function RotateLeft(lValue, iShiftBits) { return (lValue << iShiftBits) | (lValue >>> (32 - iShiftBits)); }
   function AddUnsigned(lX, lY) {
@@ -26,7 +65,7 @@ function MD5(string) {
     var lNumberOfWords_temp1 = lMessageLength + 8;
     var lNumberOfWords_temp2 = (lNumberOfWords_temp1 - (lNumberOfWords_temp1 % 64)) / 64;
     var lNumberOfWords = (lNumberOfWords_temp2 + 1) * 16;
-    var lWordArray = Array(lNumberOfWords - 1).fill(0);
+    var lWordArray = arrayFill(lNumberOfWords, 0);
     var lBytePosition = 0, lByteCount = 0;
     while (lByteCount < lMessageLength) {
       var lWordCount = (lByteCount - (lByteCount % 4)) / 4;
@@ -77,12 +116,7 @@ function MD5(string) {
   return (WordToHex(a) + WordToHex(b) + WordToHex(c) + WordToHex(d)).toLowerCase();
 }
 
-function padStart(str, len, pad) {
-  str = String(str);
-  while (str.length < len) str = pad + str;
-  return str;
-}
-
+// ==================== 工具函数 ====================
 function getUTCSignDate() {
   var now = new Date();
   var pad = function(n) { return padStart(String(n), 2, '0'); };
@@ -90,6 +124,93 @@ function getUTCSignDate() {
          pad(now.getUTCHours()) + ':' + pad(now.getUTCMinutes()) + ':' + pad(now.getUTCSeconds());
 }
 
+function normalizeHeaderNameMap(headers) {
+  var out = {};
+  if (headers) {
+    var keys = Object.keys(headers);
+    for (var i = 0; i < keys.length; i++) {
+      out[keys[i]] = headers[keys[i]];
+    }
+  }
+  return out;
+}
+
+function parseRawQuery(url) {
+  var query = (url.split('?')[1] || '').split('#')[0];
+  var rawMap = {};
+  var pairs = query.split('&');
+  for (var i = 0; i < pairs.length; i++) {
+    var pair = pairs[i];
+    if (!pair) continue;
+    var idx = pair.indexOf('=');
+    if (idx < 0) continue;
+    var k = pair.slice(0, idx);
+    var v = pair.slice(idx + 1);
+    rawMap[k] = v;
+  }
+  return rawMap;
+}
+
+function fingerprintOf(paramsRaw) {
+  var drop = { sign:1, signDate:1, timestamp:1, ts:1, nonce:1, random:1, reqTime:1, reqId:1, requestId:1 };
+  var keys = Object.keys(paramsRaw || {});
+  var keep = [];
+  for (var i = 0; i < keys.length; i++) {
+    if (!drop[keys[i]]) keep.push(keys[i]);
+  }
+  keep.sort();
+  var base = '';
+  for (var i = 0; i < keep.length; i++) {
+    if (i > 0) base += '&';
+    base += keep[i] + '=' + paramsRaw[keep[i]];
+  }
+  return MD5(base).slice(0, 12);
+}
+
+// ==================== 存储 ====================
+function loadStore() {
+  var raw = $prefs.valueForKey(storeKey);
+  if (!raw) return { version: 1, accounts: {}, order: [], dailyStats: {} };
+  try {
+    var obj = JSON.parse(raw);
+    if (!obj.accounts) obj.accounts = {};
+    if (!Array.isArray(obj.order)) obj.order = Object.keys(obj.accounts);
+    if (!obj.dailyStats) obj.dailyStats = {};
+    return obj;
+  } catch (e) {
+    return { version: 1, accounts: {}, order: [], dailyStats: {} };
+  }
+}
+
+function saveStore(store) {
+  $prefs.setValueForKey(JSON.stringify(store), storeKey);
+}
+
+// ==================== 随机化 ====================
+function pickItem(arr, seed) {
+  return arr[seed % arr.length];
+}
+
+function buildUA(baseUA, seed) {
+  var iosVer = pickItem(IOS_VERSIONS, seed);
+  var scale = pickItem(IOS_SCALES, seed + 1);
+  var model = pickItem(IPHONE_MODELS, seed + 2);
+  var cfn = pickItem(CFN_VERS, seed + 3);
+  var darwin = pickItem(DARWIN_VERS, seed + 4);
+  if (baseUA && typeof baseUA === 'string') {
+    var ua = baseUA;
+    var changed = false;
+    if (/iOS \d+(\.\d+){0,2}/.test(ua)) { ua = ua.replace(/iOS \d+(\.\d+){0,2}/, 'iOS ' + iosVer); changed = true; }
+    if (/Scale\/\d+(\.\d+)?/.test(ua)) { ua = ua.replace(/Scale\/\d+(\.\d+)?/, 'Scale/' + scale); changed = true; }
+    if (/iPhone\d+,\d+/.test(ua)) { ua = ua.replace(/iPhone\d+,\d+/, model); changed = true; }
+    if (/CFNetwork\/[\d.]+/.test(ua)) { ua = ua.replace(/CFNetwork\/[\d.]+/, 'CFNetwork/' + cfn); changed = true; }
+    if (/Darwin\/[\d.]+/.test(ua)) { ua = ua.replace(/Darwin\/[\d.]+/, 'Darwin/' + darwin); changed = true; }
+    if (changed) return ua;
+  }
+  return 'WeTalk/30.6.0 (com.innovationworks.wetalk; build:28; iOS ' + iosVer + ') Alamofire/5.4.3';
+}
+
+// ==================== 请求构造 ====================
 function buildSignedParamsRaw(capture) {
   var params = {};
   var keys = Object.keys(capture.paramsRaw || {});
@@ -144,42 +265,245 @@ function buildHeaders(capture, ua) {
   return headers;
 }
 
+// ==================== 通知等 ====================
 function notify(title, body) {
   $notify(scriptName, title, body);
 }
 
-// ==================== 极简主流程 ====================
-// 1. 读存储
-var storeRaw = $prefs.valueForKey(storeKey);
-if (!storeRaw) {
-  notify('未找到存储', '请先打开 WeTalk 触发抓包');
-  $done();
+function sleep(ms) {
+  return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-var store = JSON.parse(storeRaw);
-var ids = store.order || [];
+// ==================== 单账号执行（核心，含手动模式调试） ====================
+function runAccount(acc, store, forceNotify) {
+  // 补空格函数
+  function padRight(str, len) {
+    str = String(str);
+    while (str.length < len) str += ' ';
+    return str;
+  }
 
-// 2. 取第一个账号的 capture 数据
-var firstId = ids[0];
-var acc = store.accounts[firstId];
-if (!acc || !acc.capture) {
-  notify('账号数据缺失', '请重新触发抓包');
-  $done();
+  var now = new Date();
+  var today = now.getFullYear() + '/' + (now.getMonth() + 1) + '/' + now.getDate();
+  var stats = store.dailyStats[acc.id];
+  if (!stats || stats.date !== today) {
+    stats = { date: today, checkInCount: 0, videoCount: 0, initialBalance: null, lastBalance: null };
+  }
+  if (stats.lastBalance === undefined) stats.lastBalance = null;
+
+  var ua = buildUA(acc.baseUA, acc.uaSeed);
+  var headers = buildHeaders(acc.capture, ua);
+
+  function fetchApi(path) {
+    return $task.fetch({ url: buildUrl(path, acc.capture), method: 'GET', headers: headers });
+  }
+
+  function parseBody(res) {
+    try {
+      return JSON.parse(res.body);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // 组装格式化输出
+  function formatResult(finalBalance) {
+    var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
+    var fin = finalBalance !== null ? finalBalance.toFixed(3) : '--';
+    var leftCoin = '初始金币: ' + ini + ' ';
+    var leftSign = '今日签到: ' + stats.checkInCount + ' 次 ';
+    var maxLen = Math.max(leftCoin.length, leftSign.length);
+    leftCoin = padRight(leftCoin, maxLen);
+    leftSign = padRight(leftSign, maxLen);
+    var line1 = leftCoin + '; 最新金币: ' + fin;
+    var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
+    return line1 + '\n' + line2;
+  }
+
+  // 1. 查初始余额
+  return fetchApi('queryBalanceAndBonus').then(function(res) {
+    var d = parseBody(res);
+    if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
+      stats.initialBalance = Number(d.result.balance);
+    }
+
+    // ★ 手动模式：只查余额，不签到、不领视频
+    if (forceNotify) {
+      return fetchApi('queryBalanceAndBonus').then(function(res2) {
+        var finalBalance = null;
+        var d2 = parseBody(res2);
+        if (d2 && d2.retcode === 0 && d2.result && d2.result.balance !== undefined) {
+          finalBalance = Number(d2.result.balance);
+        }
+        var debugInfo = '【手动模式调试】\n';
+        debugInfo += 'forceNotify: true\n';
+        debugInfo += 'lastBalance: ' + stats.lastBalance + '\n';
+        debugInfo += 'finalBalance: ' + finalBalance + '\n';
+        debugInfo += '初始余额: ' + stats.initialBalance + '\n';
+        debugInfo += '签到次数: ' + stats.checkInCount + '\n';
+        debugInfo += '观看次数: ' + stats.videoCount;
+        notify('WeTalk 手动模式调试', debugInfo);
+        return formatResult(finalBalance);
+      }).catch(function() {
+        notify('WeTalk 手动模式调试', '查询余额失败');
+        return formatResult(null);
+      });
+    }
+
+    // ★ 定时模式：继续签到和视频奖励
+    return fetchApi('checkIn');
+  }).then(function(res) {
+    // 手动模式下这里不会执行（上面已经 return 了）
+    var d = parseBody(res);
+    if (d && d.retcode === 0) {
+      var hasReward = d.result && (d.result.bonus !== undefined || d.result.bonusHint !== undefined);
+      var msg = d.retmsg || '';
+      var isNewCheckIn = msg.indexOf('已经签过') === -1 && msg.indexOf('明天再试') === -1;
+      if (hasReward || isNewCheckIn) {
+        stats.checkInCount++;
+      }
+    }
+    // 2. 领视频奖励（遇到上限立即停止）
+    var p = Promise.resolve();
+    var videoLimitReached = false;
+    for (var i = 0; i < MAX_VIDEO; i++) {
+      (function(idx) {
+        p = p.then(function() {
+          if (videoLimitReached) return;
+          return new Promise(function(resolve) {
+            setTimeout(function() {
+              resolve(fetchApi('videoBonus').then(function(res) {
+                var d = parseBody(res);
+                if (d && d.retcode === 0) {
+                  var hasBonus = d.result && d.result.bonus !== undefined && Number(d.result.bonus) > 0;
+                  var msg = d.retmsg || '';
+                  var notLimited = msg.indexOf('次数过多') === -1 && msg.indexOf('明天再试') === -1;
+                  if (hasBonus && notLimited) {
+                    stats.videoCount++;
+                  } else {
+                    videoLimitReached = true;
+                  }
+                } else {
+                  videoLimitReached = true;
+                }
+              }));
+            }, idx === 0 ? 1500 : VIDEO_DELAY);
+          });
+        });
+      })(i);
+    }
+    return p;
+  }).then(function() {
+    // 手动模式下这里不会执行
+    return fetchApi('queryBalanceAndBonus');
+  }).then(function(res) {
+    // 手动模式下这里不会执行
+    var finalBalance = null;
+    var d = parseBody(res);
+    if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
+      finalBalance = Number(d.result.balance);
+    }
+
+    // 判断是否通知
+    var shouldNotify = false;
+    if (stats.lastBalance === null || (finalBalance !== null && finalBalance > stats.lastBalance)) {
+      shouldNotify = true;
+      if (finalBalance !== null) stats.lastBalance = finalBalance;
+    }
+
+    store.dailyStats[acc.id] = stats;
+    saveStore(store);
+
+    if (shouldNotify) {
+      return formatResult(finalBalance);
+    }
+    return '';
+  }).catch(function(err) {
+    if (forceNotify) {
+      return formatResult(null);
+    }
+    // 定时模式异常也弹出
+    var errMsg = (err && err.error) ? err.error : String(err);
+    return formatResult(null) + '\n异常: ' + errMsg;
+  });
 }
 
-// 3. 构造请求
-var ua = 'WeTalk/30.6.0 (com.innovationworks.wetalk; build:28; iOS 17.5.1) Alamofire/5.4.3';
-var headers = buildHeaders(acc.capture, ua);
-var url = buildUrl('queryBalanceAndBonus', acc.capture);
+// ==================== 主流程 ====================
+if (typeof $request !== 'undefined' && $request) {
+  // 抓包模式
+  var paramsRaw = parseRawQuery($request.url);
+  var headersMap = normalizeHeaderNameMap($request.headers || {});
+  var baseUA = '';
+  var hKeys = Object.keys(headersMap);
+  for (var i = 0; i < hKeys.length; i++) {
+    if (hKeys[i].toLowerCase() === 'user-agent') baseUA = headersMap[hKeys[i]];
+  }
 
-// 4. 发请求并强制弹通知
-$task.fetch({ url: url, method: 'GET', headers: headers }).then(function(res) {
-  var info = '';
-  info += 'statusCode: ' + res.statusCode + '\n';
-  info += 'body前200字符: ' + (res.body || '').substring(0, 200);
-  notify('余额查询成功', info);
-  $done();
-}).catch(function(err) {
-  notify('余额查询失败', '错误: ' + (err.error || JSON.stringify(err)));
-  $done();
-});
+  var store = loadStore();
+  var fp = fingerprintOf(paramsRaw);
+  var nowTime = Date.now();
+  var existed = !!store.accounts[fp];
+  var uaSeed = existed ? store.accounts[fp].uaSeed : store.order.length;
+  var alias = existed ? store.accounts[fp].alias : '账号' + (store.order.length + 1);
+
+  store.accounts[fp] = {
+    id: fp,
+    alias: alias,
+    uaSeed: uaSeed,
+    baseUA: baseUA,
+    capture: { url: $request.url, paramsRaw: paramsRaw, headers: headersMap },
+    createdAt: existed ? store.accounts[fp].createdAt : nowTime,
+    updatedAt: nowTime
+  };
+  if (!existed) store.order.push(fp);
+  saveStore(store);
+
+  var total = store.order.length;
+  if (!existed) {
+    notify('新账号已入库', alias + '（id:' + fp + '）\n当前账号总数：' + total);
+  }
+  $done({});
+} else {
+  // 定时任务 / 手动运行模式
+  var store = loadStore();
+  var ids = [];
+  var order = store.order;
+  for (var i = 0; i < order.length; i++) {
+    var id = order[i];
+    if (store.accounts[id]) ids.push(id);
+  }
+  if (!ids.length) {
+    notify('未抓到任何账号', '请先打开 WeTalk 触发抓包');
+    $done();
+  } else {
+    var total = ids.length;
+    var results = [];
+    var isManual = FORCE_NOTIFY;
+    var chain = Promise.resolve();
+    for (var idx = 0; idx < ids.length; idx++) {
+      (function(index) {
+        chain = chain.then(function() {
+          return runAccount(store.accounts[ids[index]], store, isManual);
+        }).then(function(text) {
+          results.push(text);
+          if (index < ids.length - 1) {
+            return sleep(ACCOUNT_GAP);
+          }
+        });
+      })(idx);
+    }
+    chain.then(function() {
+      var validResults = [];
+      for (var r = 0; r < results.length; r++) {
+        if (results[r] !== '') validResults.push(results[r]);
+      }
+      if (validResults.length > 0) {
+        notify('全部完成 (' + total + '个账号)', validResults.join('\n———\n'));
+      }
+      $done();
+    }).catch(function(err) {
+      notify('执行异常 (' + total + '个账号)', (results.join('\n———\n')) + '\n' + (err.error || String(err)));
+      $done();
+    });
+  }
+}
