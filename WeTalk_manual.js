@@ -274,7 +274,7 @@ function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// ==================== 单账号执行（核心） ====================
+// ==================== 单账号执行（核心，内部直接弹通知） ====================
 function runAccount(acc, store, forceNotify) {
   function padRight(str, len) {
     str = String(str);
@@ -305,7 +305,7 @@ function runAccount(acc, store, forceNotify) {
     }
   }
 
-  function formatResult(finalBalance) {
+  function formatAndNotify(finalBalance) {
     var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
     var fin = finalBalance !== null ? finalBalance.toFixed(3) : '--';
     var leftCoin = '初始金币: ' + ini + ' ';
@@ -315,7 +315,7 @@ function runAccount(acc, store, forceNotify) {
     leftSign = padRight(leftSign, maxLen);
     var line1 = leftCoin + '; 最新金币: ' + fin;
     var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
-    return line1 + '\n' + line2;
+    notify(acc.alias || acc.id, line1 + '\n' + line2);
   }
 
   return fetchApi('queryBalanceAndBonus').then(function(res) {
@@ -331,9 +331,13 @@ function runAccount(acc, store, forceNotify) {
         if (d2 && d2.retcode === 0 && d2.result && d2.result.balance !== undefined) {
           finalBalance = Number(d2.result.balance);
         }
-        return formatResult(finalBalance);
+        formatAndNotify(finalBalance);
+        store.dailyStats[acc.id] = stats;
+        saveStore(store);
       }).catch(function() {
-        return formatResult(null);
+        formatAndNotify(null);
+        store.dailyStats[acc.id] = stats;
+        saveStore(store);
       });
     }
 
@@ -398,19 +402,21 @@ function runAccount(acc, store, forceNotify) {
     saveStore(store);
 
     if (shouldNotify) {
-      return formatResult(finalBalance);
+      formatAndNotify(finalBalance);
     }
-    return '';
   }).catch(function(err) {
     if (forceNotify) {
-      return formatResult(null);
+      formatAndNotify(null);
+      store.dailyStats[acc.id] = stats;
+      saveStore(store);
+    } else {
+      var errMsg = (err && err.error) ? err.error : String(err);
+      notify(acc.alias || acc.id, '初始金币: -- ; 最新金币: --\n今日签到: -- 次   ; 今日观看: -- 条\n异常: ' + errMsg);
     }
-    var errMsg = (err && err.error) ? err.error : String(err);
-    return formatResult(null) + '\n异常: ' + errMsg;
   });
 }
 
-// ==================== 主流程 ====================
+// ==================== 主流程（极简，不收集结果） ====================
 if (typeof $request !== 'undefined' && $request) {
   var paramsRaw = parseRawQuery($request.url);
   var headersMap = normalizeHeaderNameMap($request.headers || {});
@@ -456,39 +462,26 @@ if (typeof $request !== 'undefined' && $request) {
     notify('未抓到任何账号', '请先打开 WeTalk 触发抓包');
     $done();
   } else {
-    var total = ids.length;
-    var results = [];
     var isManual = FORCE_NOTIFY;
+    var idx = 0;
 
-    // ★ 修复 Promise 链：确保 runAccount 返回值正确传递
-    function runSequentially(index) {
-      if (index >= ids.length) {
-        var validResults = [];
-        for (var r = 0; r < results.length; r++) {
-          if (results[r] !== '') validResults.push(results[r]);
-        }
-        if (validResults.length > 0) {
-          notify('全部完成 (' + total + '个账号)', validResults.join('\n———\n'));
-        }
+    function runNext() {
+      if (idx >= ids.length) {
         $done();
         return;
       }
-
-      runAccount(store.accounts[ids[index]], store, isManual).then(function(text) {
-        results.push(text);
-        if (index < ids.length - 1) {
-          sleep(ACCOUNT_GAP).then(function() {
-            runSequentially(index + 1);
-          });
+      runAccount(store.accounts[ids[idx]], store, isManual).then(function() {
+        idx++;
+        if (idx < ids.length) {
+          sleep(ACCOUNT_GAP).then(runNext);
         } else {
-          runSequentially(index + 1);
+          runNext();
         }
-      }).catch(function(err) {
-        notify('执行异常 (' + total + '个账号)', (err.error || String(err)));
+      }).catch(function() {
         $done();
       });
     }
 
-    runSequentially(0);
+    runNext();
   }
 }
