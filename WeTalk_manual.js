@@ -2,7 +2,7 @@
 @Name：WeTalk 自动化签到+视频奖励
 @Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容最终版)
        定时运行：金币有增长才弹窗，无增长不弹，异常时弹窗
-       手动运行：只查余额，不签到不领视频，始终弹窗（带调试）
+       手动运行：只查余额，不签到不领视频，始终弹窗
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js
 [task_local]
@@ -21,7 +21,7 @@ var ACCOUNT_GAP = 3500;
 
 // ==================== 手动/定时通知开关 ====================
 // false = 定时模式（有增长才通知）  true = 手动模式（始终通知，只查不操作）
-var FORCE_NOTIFY = true;
+var FORCE_NOTIFY = false;
 
 var IOS_VERSIONS = ['17.5.1','17.6.1','17.4.1','17.2.1','16.7.8','17.6','17.3.1','18.0.1','17.1.2','16.6.1'];
 var IOS_SCALES = ['2.00','3.00','3.00','2.00','3.00'];
@@ -274,7 +274,7 @@ function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// ==================== 单账号执行（核心，含手动模式调试） ====================
+// ==================== 单账号执行（核心） ====================
 function runAccount(acc, store, forceNotify) {
   // 补空格函数
   function padRight(str, len) {
@@ -327,7 +327,7 @@ function runAccount(acc, store, forceNotify) {
       stats.initialBalance = Number(d.result.balance);
     }
 
-    // ★ 手动模式：只查余额，不签到、不领视频
+    // ★ 手动模式：只查余额，不签到、不领视频，不更新 lastBalance，始终返回结果
     if (forceNotify) {
       return fetchApi('queryBalanceAndBonus').then(function(res2) {
         var finalBalance = null;
@@ -335,17 +335,8 @@ function runAccount(acc, store, forceNotify) {
         if (d2 && d2.retcode === 0 && d2.result && d2.result.balance !== undefined) {
           finalBalance = Number(d2.result.balance);
         }
-        var debugInfo = '【手动模式调试】\n';
-        debugInfo += 'forceNotify: true\n';
-        debugInfo += 'lastBalance: ' + stats.lastBalance + '\n';
-        debugInfo += 'finalBalance: ' + finalBalance + '\n';
-        debugInfo += '初始余额: ' + stats.initialBalance + '\n';
-        debugInfo += '签到次数: ' + stats.checkInCount + '\n';
-        debugInfo += '观看次数: ' + stats.videoCount;
-        notify('WeTalk 手动模式调试', debugInfo);
         return formatResult(finalBalance);
       }).catch(function() {
-        notify('WeTalk 手动模式调试', '查询余额失败');
         return formatResult(null);
       });
     }
@@ -404,11 +395,14 @@ function runAccount(acc, store, forceNotify) {
       finalBalance = Number(d.result.balance);
     }
 
-    // 判断是否通知
+    // 判断是否通知（仅定时模式进入）
     var shouldNotify = false;
     if (stats.lastBalance === null || (finalBalance !== null && finalBalance > stats.lastBalance)) {
       shouldNotify = true;
-      if (finalBalance !== null) stats.lastBalance = finalBalance;
+    }
+    // 更新 lastBalance：仅在定时模式有增长时更新
+    if (finalBalance !== null && (stats.lastBalance === null || finalBalance > stats.lastBalance)) {
+      stats.lastBalance = finalBalance;
     }
 
     store.dailyStats[acc.id] = stats;
