@@ -489,18 +489,19 @@ if (typeof $request !== 'undefined' && $request) {
     notify('调试-主流程', 'isManual=' + isManual + '\n账号总数=' + total);
     var chain = Promise.resolve();
     for (var idx = 0; idx < ids.length; idx++) {
-      (function(index) {
-        chain = chain.then(function() {
-          return runAccount(store.accounts[ids[index]], store, isManual);
-        }).then(function(text) {
-          notify('调试-runAccount返回', '内容长度=' + text.length + '\n内容前200字符=' + text.substring(0, 200));
-          results.push(text);
-          if (index < ids.length - 1) {
-            return sleep(ACCOUNT_GAP);
-          }
-        });
-      })(idx);
-    }
+  (function(index) {
+    chain = chain.then(function() {
+      return runAccount(store.accounts[ids[index]], store, isManual).then(function(text) {
+        notify('调试-runAccount返回', '内容长度=' + text.length + '\n内容前200字符=' + text.substring(0, 200));
+        results.push(text);
+        if (index < ids.length - 1) {
+          return sleep(ACCOUNT_GAP);
+        }
+        return text;
+      });
+    });
+  })(idx);
+}
     chain.then(function() {
       var validResults = [];
       for (var r = 0; r < results.length; r++) {
