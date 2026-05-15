@@ -1,6 +1,6 @@
 /*
-@Name：WeTalk 自动化签到+视频奖励 (调试版)
-@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容)
+@Name：WeTalk 自动化签到+视频奖励
+@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容最终版)
        定时运行：金币有增长才弹窗，无增长不弹，异常时弹窗
        手动运行：只查余额，不签到不领视频，始终弹窗
 [rewrite_local]
@@ -274,17 +274,13 @@ function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// ==================== 单账号执行（核心，含手动模式调试） ====================
+// ==================== 单账号执行（核心） ====================
 function runAccount(acc, store, forceNotify) {
-  // 补空格函数
   function padRight(str, len) {
     str = String(str);
     while (str.length < len) str += ' ';
     return str;
   }
-
-  // ★ 调试：runAccount 入口
-  notify('调试-runAccount入口', 'forceNotify=' + forceNotify + '\n账号ID=' + acc.id);
 
   var now = new Date();
   var today = now.getFullYear() + '/' + (now.getMonth() + 1) + '/' + now.getDate();
@@ -309,7 +305,6 @@ function runAccount(acc, store, forceNotify) {
     }
   }
 
-  // 组装格式化输出
   function formatResult(finalBalance) {
     var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
     var fin = finalBalance !== null ? finalBalance.toFixed(3) : '--';
@@ -323,41 +318,27 @@ function runAccount(acc, store, forceNotify) {
     return line1 + '\n' + line2;
   }
 
-  // 1. 查初始余额
   return fetchApi('queryBalanceAndBonus').then(function(res) {
     var d = parseBody(res);
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
       stats.initialBalance = Number(d.result.balance);
     }
 
-    notify('调试-第1次查询完成', 'initialBalance=' + stats.initialBalance + '\nforceNotify=' + forceNotify);
-
-    // ★ 手动模式：只查余额，不签到、不领视频，始终返回结果
     if (forceNotify) {
-      notify('调试-进入手动分支', '即将第2次查询余额');
       return fetchApi('queryBalanceAndBonus').then(function(res2) {
-        notify('调试-第2次查询成功', 'status=' + res2.statusCode + '\nbody前200=' + (res2.body || '').substring(0, 200));
         var finalBalance = null;
         var d2 = parseBody(res2);
         if (d2 && d2.retcode === 0 && d2.result && d2.result.balance !== undefined) {
           finalBalance = Number(d2.result.balance);
-          notify('调试-解析成功', 'finalBalance=' + finalBalance);
-        } else {
-          notify('调试-解析失败', 'retcode=' + (d2 ? d2.retcode : 'null'));
         }
-        var result = formatResult(finalBalance);
-        notify('调试-即将返回结果', 'result前100字符=' + result.substring(0, 100));
-        return result;
-      }).catch(function(e) {
-        notify('调试-手动请求失败', '错误=' + (e.error || JSON.stringify(e)));
+        return formatResult(finalBalance);
+      }).catch(function() {
         return formatResult(null);
       });
     }
 
-    // ★ 定时模式：继续签到和视频奖励
     return fetchApi('checkIn');
   }).then(function(res) {
-    // 手动模式下这里不会执行（上面已经 return 了）
     var d = parseBody(res);
     if (d && d.retcode === 0) {
       var hasReward = d.result && (d.result.bonus !== undefined || d.result.bonusHint !== undefined);
@@ -367,7 +348,6 @@ function runAccount(acc, store, forceNotify) {
         stats.checkInCount++;
       }
     }
-    // 2. 领视频奖励（遇到上限立即停止）
     var p = Promise.resolve();
     var videoLimitReached = false;
     for (var i = 0; i < MAX_VIDEO; i++) {
@@ -398,22 +378,18 @@ function runAccount(acc, store, forceNotify) {
     }
     return p;
   }).then(function() {
-    // 手动模式下这里不会执行
     return fetchApi('queryBalanceAndBonus');
   }).then(function(res) {
-    // 手动模式下这里不会执行
     var finalBalance = null;
     var d = parseBody(res);
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
       finalBalance = Number(d.result.balance);
     }
 
-    // 判断是否通知（仅定时模式进入）
     var shouldNotify = false;
     if (stats.lastBalance === null || (finalBalance !== null && finalBalance > stats.lastBalance)) {
       shouldNotify = true;
     }
-    // 更新 lastBalance：仅在定时模式有增长时更新
     if (finalBalance !== null && (stats.lastBalance === null || finalBalance > stats.lastBalance)) {
       stats.lastBalance = finalBalance;
     }
@@ -429,7 +405,6 @@ function runAccount(acc, store, forceNotify) {
     if (forceNotify) {
       return formatResult(null);
     }
-    // 定时模式异常也弹出
     var errMsg = (err && err.error) ? err.error : String(err);
     return formatResult(null) + '\n异常: ' + errMsg;
   });
@@ -437,7 +412,6 @@ function runAccount(acc, store, forceNotify) {
 
 // ==================== 主流程 ====================
 if (typeof $request !== 'undefined' && $request) {
-  // 抓包模式
   var paramsRaw = parseRawQuery($request.url);
   var headersMap = normalizeHeaderNameMap($request.headers || {});
   var baseUA = '';
@@ -471,7 +445,6 @@ if (typeof $request !== 'undefined' && $request) {
   }
   $done({});
 } else {
-  // 定时任务 / 手动运行模式
   var store = loadStore();
   var ids = [];
   var order = store.order;
@@ -486,35 +459,36 @@ if (typeof $request !== 'undefined' && $request) {
     var total = ids.length;
     var results = [];
     var isManual = FORCE_NOTIFY;
-    notify('调试-主流程', 'isManual=' + isManual + '\n账号总数=' + total);
-    var chain = Promise.resolve();
-    for (var idx = 0; idx < ids.length; idx++) {
-  (function(index) {
-    chain = chain.then(function() {
-      return runAccount(store.accounts[ids[index]], store, isManual).then(function(text) {
-        notify('调试-runAccount返回', '内容长度=' + text.length + '\n内容前200字符=' + text.substring(0, 200));
+
+    // ★ 修复 Promise 链：确保 runAccount 返回值正确传递
+    function runSequentially(index) {
+      if (index >= ids.length) {
+        var validResults = [];
+        for (var r = 0; r < results.length; r++) {
+          if (results[r] !== '') validResults.push(results[r]);
+        }
+        if (validResults.length > 0) {
+          notify('全部完成 (' + total + '个账号)', validResults.join('\n———\n'));
+        }
+        $done();
+        return;
+      }
+
+      runAccount(store.accounts[ids[index]], store, isManual).then(function(text) {
         results.push(text);
         if (index < ids.length - 1) {
-          return sleep(ACCOUNT_GAP);
+          sleep(ACCOUNT_GAP).then(function() {
+            runSequentially(index + 1);
+          });
+        } else {
+          runSequentially(index + 1);
         }
-        return text;
+      }).catch(function(err) {
+        notify('执行异常 (' + total + '个账号)', (err.error || String(err)));
+        $done();
       });
-    });
-  })(idx);
-}
-    chain.then(function() {
-      var validResults = [];
-      for (var r = 0; r < results.length; r++) {
-        if (results[r] !== '') validResults.push(results[r]);
-      }
-      notify('调试-最终过滤', '有效结果数=' + validResults.length);
-      if (validResults.length > 0) {
-        notify('全部完成 (' + total + '个账号)', validResults.join('\n———\n'));
-      }
-      $done();
-    }).catch(function(err) {
-      notify('执行异常 (' + total + '个账号)', (results.join('\n———\n')) + '\n' + (err.error || String(err)));
-      $done();
-    });
+    }
+
+    runSequentially(0);
   }
 }
