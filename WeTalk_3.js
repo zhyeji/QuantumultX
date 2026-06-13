@@ -378,7 +378,9 @@ function runAccount(acc, store, forceNotify) {
         notify("调试-签到跳过", "可能已签到或异常");
       }
     } else {
-      notify("调试-签到异常", "retcode != 0");
+      // 关键修改：显示详细错误信息
+      var errorMsg = d && d.retmsg ? d.retmsg : (res && res.status ? "HTTP " + res.status : "未知错误");
+      notify("调试-签到异常", "retcode != 0, retmsg=" + errorMsg);
     }
 
     // 视频任务链
@@ -408,7 +410,9 @@ function runAccount(acc, store, forceNotify) {
                   }
                 } else {
                   videoLimitReached = true;
-                  notify("调试-视频错误", "第 " + (idx+1) + " 个视频请求失败");
+                  // 关键修改：显示详细错误信息
+                  var errorMsg = d && d.retmsg ? d.retmsg : (res && res.status ? "HTTP " + res.status : "未知错误");
+                  notify("调试-视频错误", "第 " + (idx+1) + " 个视频请求失败\n错误: " + errorMsg);
                 }
               }));
             }, idx === 0 ? 1500 : VIDEO_DELAY);
