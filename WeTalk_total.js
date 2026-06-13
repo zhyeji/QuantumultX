@@ -1,6 +1,6 @@
 /*
-@Name：WeTalk 自动化签到+视频奖励 (调试版)
-@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容)
+@Name：WeTalk 自动化签到+视频奖励
+@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容最终版)
        定时运行：金币有增长才弹窗，无增长不弹，异常时弹窗
        手动运行：只查余额，不签到不领视频，始终弹窗
 [rewrite_local]
@@ -21,7 +21,7 @@ var ACCOUNT_GAP = 3500;
 
 // ==================== 手动/定时通知开关 ====================
 // false = 定时模式（有增长才通知）  true = 手动模式（始终通知，只查不操作）
-var FORCE_NOTIFY = true;
+var FORCE_NOTIFY = false;
 
 var IOS_VERSIONS = ['17.5.1','17.6.1','17.4.1','17.2.1','16.7.8','17.6','17.3.1','18.0.1','17.1.2','16.6.1'];
 var IOS_SCALES = ['2.00','3.00','3.00','2.00','3.00'];
@@ -274,17 +274,13 @@ function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// ==================== 单账号执行（核心，含手动模式调试） ====================
+// ==================== 单账号执行（核心，内部直接弹通知） ====================
 function runAccount(acc, store, forceNotify) {
-  // 补空格函数
   function padRight(str, len) {
     str = String(str);
     while (str.length < len) str += ' ';
     return str;
   }
-
-  // ★ 调试：runAccount 入口
-  notify('调试-runAccount入口', 'forceNotify=' + forceNotify + '\n账号ID=' + acc.id);
 
   var now = new Date();
   var today = now.getFullYear() + '/' + (now.getMonth() + 1) + '/' + now.getDate();
@@ -309,8 +305,7 @@ function runAccount(acc, store, forceNotify) {
     }
   }
 
-  // 组装格式化输出
-  function formatResult(finalBalance) {
+  function formatAndNotify(finalBalance) {
     var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
     var fin = finalBalance !== null ? finalBalance.toFixed(3) : '--';
     var leftCoin = '初始金币: ' + ini + ' ';
@@ -320,44 +315,34 @@ function runAccount(acc, store, forceNotify) {
     leftSign = padRight(leftSign, maxLen);
     var line1 = leftCoin + '; 最新金币: ' + fin;
     var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
-    return line1 + '\n' + line2;
+    notify(acc.alias || acc.id, line1 + '\n' + line2);
   }
 
-  // 1. 查初始余额
   return fetchApi('queryBalanceAndBonus').then(function(res) {
     var d = parseBody(res);
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
       stats.initialBalance = Number(d.result.balance);
     }
 
-    notify('调试-第1次查询完成', 'initialBalance=' + stats.initialBalance + '\nforceNotify=' + forceNotify);
-
-    // ★ 手动模式：只查余额，不签到、不领视频，始终返回结果
     if (forceNotify) {
-      notify('调试-进入手动分支', '即将第2次查询余额');
       return fetchApi('queryBalanceAndBonus').then(function(res2) {
-        notify('调试-第2次查询成功', 'status=' + res2.statusCode + '\nbody前200=' + (res2.body || '').substring(0, 200));
         var finalBalance = null;
         var d2 = parseBody(res2);
         if (d2 && d2.retcode === 0 && d2.result && d2.result.balance !== undefined) {
           finalBalance = Number(d2.result.balance);
-          notify('调试-解析成功', 'finalBalance=' + finalBalance);
-        } else {
-          notify('调试-解析失败', 'retcode=' + (d2 ? d2.retcode : 'null'));
         }
-        var result = formatResult(finalBalance);
-        notify('调试-即将返回结果', 'result前100字符=' + result.substring(0, 100));
-        return result;
-      }).catch(function(e) {
-        notify('调试-手动请求失败', '错误=' + (e.error || JSON.stringify(e)));
-        return formatResult(null);
+        formatAndNotify(finalBalance);
+        store.dailyStats[acc.id] = stats;
+        saveStore(store);
+      }).catch(function() {
+        formatAndNotify(null);
+        store.dailyStats[acc.id] = stats;
+        saveStore(store);
       });
     }
 
-    // ★ 定时模式：继续签到和视频奖励
     return fetchApi('checkIn');
   }).then(function(res) {
-    // 手动模式下这里不会执行（上面已经 return 了）
     var d = parseBody(res);
     if (d && d.retcode === 0) {
       var hasReward = d.result && (d.result.bonus !== undefined || d.result.bonusHint !== undefined);
@@ -367,7 +352,6 @@ function runAccount(acc, store, forceNotify) {
         stats.checkInCount++;
       }
     }
-    // 2. 领视频奖励（遇到上限立即停止）
     var p = Promise.resolve();
     var videoLimitReached = false;
     for (var i = 0; i < MAX_VIDEO; i++) {
@@ -398,22 +382,18 @@ function runAccount(acc, store, forceNotify) {
     }
     return p;
   }).then(function() {
-    // 手动模式下这里不会执行
     return fetchApi('queryBalanceAndBonus');
   }).then(function(res) {
-    // 手动模式下这里不会执行
     var finalBalance = null;
     var d = parseBody(res);
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
       finalBalance = Number(d.result.balance);
     }
 
-    // 判断是否通知（仅定时模式进入）
     var shouldNotify = false;
     if (stats.lastBalance === null || (finalBalance !== null && finalBalance > stats.lastBalance)) {
       shouldNotify = true;
     }
-    // 更新 lastBalance：仅在定时模式有增长时更新
     if (finalBalance !== null && (stats.lastBalance === null || finalBalance > stats.lastBalance)) {
       stats.lastBalance = finalBalance;
     }
@@ -422,22 +402,23 @@ function runAccount(acc, store, forceNotify) {
     saveStore(store);
 
     if (shouldNotify) {
-      return formatResult(finalBalance);
+      formatAndNotify(finalBalance);
     }
-    return '';
   }).catch(function(err) {
     if (forceNotify) {
-      return formatResult(null);
+      formatAndNotify(null);
+      store.dailyStats[acc.id] = stats;
+      saveStore(store);
+    } else {
+      var errMsg = (err && err.error) ? err.error : String(err);
+      notify(acc.alias || acc.id, '初始金币: -- ; 最新金币: --\n今日签到: -- 次   ; 今日观看: -- 条\n异常: ' + errMsg);
     }
-    // 定时模式异常也弹出
-    var errMsg = (err && err.error) ? err.error : String(err);
-    return formatResult(null) + '\n异常: ' + errMsg;
   });
 }
 
 // ==================== 主流程 ====================
 if (typeof $request !== 'undefined' && $request) {
-  // 抓包模式
+  // ------- 抓包阶段 -------
   var paramsRaw = parseRawQuery($request.url);
   var headersMap = normalizeHeaderNameMap($request.headers || {});
   var baseUA = '';
@@ -470,8 +451,9 @@ if (typeof $request !== 'undefined' && $request) {
     notify('新账号已入库', alias + '（id:' + fp + '）\n当前账号总数：' + total);
   }
   $done({});
+
 } else {
-  // 定时任务 / 手动运行模式
+  // ------- 定时 / 手动执行阶段 -------
   var store = loadStore();
   var ids = [];
   var order = store.order;
@@ -483,38 +465,93 @@ if (typeof $request !== 'undefined' && $request) {
     notify('未抓到任何账号', '请先打开 WeTalk 触发抓包');
     $done();
   } else {
-    var total = ids.length;
-    var results = [];
     var isManual = FORCE_NOTIFY;
-    notify('调试-主流程', 'isManual=' + isManual + '\n账号总数=' + total);
-    var chain = Promise.resolve();
-    for (var idx = 0; idx < ids.length; idx++) {
-  (function(index) {
-    chain = chain.then(function() {
-      return runAccount(store.accounts[ids[index]], store, isManual).then(function(text) {
-        notify('调试-runAccount返回', '内容长度=' + text.length + '\n内容前200字符=' + text.substring(0, 200));
-        results.push(text);
-        if (index < ids.length - 1) {
-          return sleep(ACCOUNT_GAP);
+    var idx = 0;
+
+    function runNext() {
+      if (idx >= ids.length) {
+        $done();
+        return;
+      }
+      runAccount(store.accounts[ids[idx]], store, isManual).then(function() {
+        idx++;
+        if (idx < ids.length) {
+          sleep(ACCOUNT_GAP).then(runNext);
+        } else {
+          runNext();
         }
-        return text;
+      }).catch(function() {
+        $done();
       });
-    });
-  })(idx);
-}
-    chain.then(function() {
-      var validResults = [];
-      for (var r = 0; r < results.length; r++) {
-        if (results[r] !== '') validResults.push(results[r]);
+    }
+
+    // ★★★ 连接检测模块（独立职责，返回布尔值，符合Skill规范） ★★★
+    var checkConnectivity = function() {
+      var MAX_RETRIES = 5;
+      var RETRY_DELAY = 5000;
+      var PROBE_TIMEOUT = 10;
+
+      var probeAcc = store.accounts[ids[0]];
+
+      function attempt(round) {
+        var ua = buildUA(probeAcc.baseUA, probeAcc.uaSeed);
+        var headers = buildHeaders(probeAcc.capture, ua);
+        var url = buildUrl('queryBalanceAndBonus', probeAcc.capture);
+
+        console.log('🔍 WeTalk 连接检测第' + round + '/' + MAX_RETRIES + '轮开始...');
+
+        return $task.fetch({
+          url: url,
+          method: 'GET',
+          headers: headers,
+          timeout: PROBE_TIMEOUT
+        }).then(function(res) {
+          var ok = false;
+          try {
+            var data = JSON.parse(res.body);
+            if (data && data.retcode === 0) ok = true;
+          } catch (e) {}
+
+          if (ok) {
+            console.log('✅ WeTalk 连接检测第' + round + '轮通过（网络可达 + 业务正常）');
+            return true;
+          }
+
+          console.log('⚠️ WeTalk 连接检测第' + round + '轮未通过（业务异常或数据错误）');
+          if (round < MAX_RETRIES) {
+            console.log('⏳ ' + (RETRY_DELAY/1000) + '秒后重试...');
+            return sleep(RETRY_DELAY).then(function() {
+              return attempt(round + 1);
+            });
+          }
+          console.log('❌ WeTalk 连接检测已达最大重试次数（' + MAX_RETRIES + '轮），按策略继续执行');
+          return false;
+        }).catch(function(err) {
+          var errMsg = (err && err.message) ? err.message : String(err);
+          console.log('❌ WeTalk 连接检测第' + round + '轮网络失败: ' + errMsg);
+          if (round < MAX_RETRIES) {
+            console.log('⏳ ' + (RETRY_DELAY/1000) + '秒后重试...');
+            return sleep(RETRY_DELAY).then(function() {
+              return attempt(round + 1);
+            });
+          }
+          console.log('❌ WeTalk 连接检测已达最大重试次数（' + MAX_RETRIES + '轮），按策略继续执行');
+          return false;
+        });
       }
-      notify('调试-最终过滤', '有效结果数=' + validResults.length);
-      if (validResults.length > 0) {
-        notify('全部完成 (' + total + '个账号)', validResults.join('\n———\n'));
+
+      return attempt(1);
+    };
+
+    // 主流程：先检测连接，再根据结果决定行为（满足规范要求的独立模块+返回值通信）
+    checkConnectivity().then(function(reachable) {
+      if (reachable) {
+        console.log('✅ WeTalk 连接检测通过，开始执行签到任务');
+      } else {
+        console.log('⚠️ WeTalk 连接检测未通过，但按策略继续执行签到任务（可能失败）');
       }
-      $done();
-    }).catch(function(err) {
-      notify('执行异常 (' + total + '个账号)', (results.join('\n———\n')) + '\n' + (err.error || String(err)));
-      $done();
+      // 不论检测结果如何，都继续执行签到（第5轮策略）
+      runNext();
     });
   }
 }
