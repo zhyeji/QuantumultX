@@ -1,6 +1,6 @@
 /*
-@Name：WeTalk 自动化签到+视频奖励 (async/await 调试版)
-@Desc：手动执行只查余额，定时任务签到+视频，遇超时自动重试最多5次，每日首次运行必弹窗（仅在有数据时）
+@Name：WeTalk 自动化签到+视频奖励 (抓包定位版)
+@Desc：手动执行只查余额，定时任务签到+视频，遇超时自动重试最多5次，弹窗严格遵循“仅有增长才弹窗”
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js
 [task_local]
@@ -272,7 +272,7 @@ function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// ==================== 单账号执行（async/await 调试版） ====================
+// ==================== 单账号执行（async/await 最终版） ====================
 async function runAccount(acc, store, forceNotify, notifyOnError) {
   function padRight(str, len) {
     str = String(str);
@@ -385,29 +385,23 @@ async function runAccount(acc, store, forceNotify, notifyOnError) {
       }
     }
 
-    // 最后查询余额（带调试）
+    // 最后查询余额
     var resFinal = await fetchApi('queryBalanceAndBonus');
-    
-    // 【调试】把完整的响应弹出来
-    var debugMsg = "status: " + resFinal.status + "\n";
-    debugMsg += "body: " + (resFinal.body || "（空）");
-    notify("调试-最终余额响应", debugMsg);
-
     var dFinal = parseBody(resFinal);
     var finalBalance = null;
     if (dFinal && dFinal.retcode === 0 && dFinal.result && dFinal.result.balance !== undefined) {
       finalBalance = Number(dFinal.result.balance);
     }
 
-    // 严格真实逻辑：只有获取到有效余额才考虑弹窗
+    // 严格弹窗逻辑：只有历史有记录、当前有数据、且金币真正增长才弹窗
     var shouldNotify = false;
-    if (finalBalance !== null) {
-      if (stats.lastBalance === null || finalBalance > stats.lastBalance) {
+    if (stats.lastBalance !== null && finalBalance !== null) {
+      if (finalBalance > stats.lastBalance) {
         shouldNotify = true;
       }
       stats.lastBalance = finalBalance;
     }
-    // 如果 finalBalance === null，shouldNotify 保持 false，不弹窗，也不更新 lastBalance
+    // 如果历史没记录（lastBalance 为 null），不弹窗，也不更新记录，等待下一次成功运行
 
     store.dailyStats[acc.id] = stats;
     saveStore(store);
@@ -503,16 +497,14 @@ if (typeof $request !== 'undefined' && $request) {
             // 最后一次重试时允许弹窗
             var shouldNotifyOnError = (retryCount === 4);
             await runAccount(currentAccount, store, isManual, shouldNotifyOnError);
-            success = true; // ✅ 成功执行后立即退出重试循环
+            success = true;
           } catch (err) {
             var errMsg = (err && err.error) ? err.error : String(err);
             var isTimeout = errMsg.toLowerCase().indexOf('timeout') !== -1;
             if (isTimeout && retryCount < 4) {
               retryCount++;
-              // 继续重试
             } else {
-              // 非 timeout 错误或重试次数耗尽，跳过当前账号
-              success = true;
+              success = true; // 跳过当前账号
             }
           }
         }
