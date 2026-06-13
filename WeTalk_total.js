@@ -1,6 +1,6 @@
 /*
-@Name：WeTalk 自动化签到+视频奖励 (async/await 版)
-@Desc：手动执行只查余额，定时任务签到+视频，遇超时自动重试最多5次，每日首次运行必弹窗
+@Name：WeTalk 自动化签到+视频奖励 (async/await 调试版)
+@Desc：手动执行只查余额，定时任务签到+视频，遇超时自动重试最多5次，每日首次运行必弹窗（仅在有数据时）
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js
 [task_local]
@@ -205,7 +205,7 @@ function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// ==================== 单账号执行（async/await 版） ====================
+// ==================== 单账号执行（async/await 调试版） ====================
 async function runAccount(acc, store, forceNotify, notifyOnError) {
   function padRight(str, len) {
     str = String(str);
@@ -255,7 +255,7 @@ async function runAccount(acc, store, forceNotify, notifyOnError) {
   }
 
   try {
-    // 第1次查询余额
+    // 第一次余额查询
     var res1 = await fetchApi('queryBalanceAndBonus');
     var d1 = parseBody(res1);
     if (d1 && d1.retcode === 0 && d1.result && d1.result.balance !== undefined) {
@@ -276,57 +276,71 @@ async function runAccount(acc, store, forceNotify, notifyOnError) {
       return;
     }
 
-    // 自动模式：签到
-    var resCheck = await fetchApi('checkIn');
-    var dCheck = parseBody(resCheck);
-    if (dCheck && dCheck.retcode === 0) {
-      var hasReward = dCheck.result && (dCheck.result.bonus !== undefined || dCheck.result.bonusHint !== undefined);
-      var msg = dCheck.retmsg || '';
-      var isNewCheckIn = msg.indexOf('已经签过') === -1 && msg.indexOf('明天再试') === -1;
-      if (hasReward || isNewCheckIn) {
-        stats.checkInCount++;
+    // 自动模式：签到（无论是否成功，都继续执行后续视频）
+    try {
+      var resCheck = await fetchApi('checkIn');
+      var dCheck = parseBody(resCheck);
+      if (dCheck && dCheck.retcode === 0) {
+        var hasReward = dCheck.result && (dCheck.result.bonus !== undefined || dCheck.result.bonusHint !== undefined);
+        var msg = dCheck.retmsg || '';
+        var isNewCheckIn = msg.indexOf('已经签过') === -1 && msg.indexOf('明天再试') === -1;
+        if (hasReward || isNewCheckIn) {
+          stats.checkInCount++;
+        }
       }
+    } catch (e) {
+      // 签到失败不影响视频任务继续
     }
 
-    // 视频任务链（串行，带间隔）
+    // 视频任务链
     var videoLimitReached = false;
     for (var i = 0; i < MAX_VIDEO; i++) {
       if (videoLimitReached) break;
-      // 第一个视频等待短一些，后续每个等待 VIDEO_DELAY
       var waitTime = (i === 0) ? 1500 : VIDEO_DELAY;
       await sleep(waitTime);
-      var resVideo = await fetchApi('videoBonus');
-      var dVideo = parseBody(resVideo);
-      if (dVideo && dVideo.retcode === 0) {
-        var hasBonus = dVideo.result && dVideo.result.bonus !== undefined && Number(dVideo.result.bonus) > 0;
-        var msg = dVideo.retmsg || '';
-        var notLimited = msg.indexOf('次数过多') === -1 && msg.indexOf('明天再试') === -1;
-        if (hasBonus && notLimited) {
-          stats.videoCount++;
+      try {
+        var resVideo = await fetchApi('videoBonus');
+        var dVideo = parseBody(resVideo);
+        if (dVideo && dVideo.retcode === 0) {
+          var hasBonus = dVideo.result && dVideo.result.bonus !== undefined && Number(dVideo.result.bonus) > 0;
+          var msg = dVideo.retmsg || '';
+          var notLimited = msg.indexOf('次数过多') === -1 && msg.indexOf('明天再试') === -1;
+          if (hasBonus && notLimited) {
+            stats.videoCount++;
+          } else {
+            videoLimitReached = true;
+          }
         } else {
           videoLimitReached = true;
         }
-      } else {
-        videoLimitReached = true;
+      } catch (e) {
+        // 单个视频请求失败，继续尝试下一个
       }
     }
 
-    // 最后查询余额
+    // 最后查询余额（带完整调试）
     var resFinal = await fetchApi('queryBalanceAndBonus');
+    
+    // 【调试】把完整的响应弹出来
+    var debugMsg = "status: " + resFinal.status + "\n";
+    debugMsg += "body: " + (resFinal.body || "（空）");
+    notify("调试-最终余额响应", debugMsg);
+
     var dFinal = parseBody(resFinal);
     var finalBalance = null;
     if (dFinal && dFinal.retcode === 0 && dFinal.result && dFinal.result.balance !== undefined) {
       finalBalance = Number(dFinal.result.balance);
     }
 
+    // 严格真实逻辑：只有获取到有效余额才考虑弹窗
     var shouldNotify = false;
-    // 每日首次运行或金币增长时弹窗
-    if (stats.lastBalance === null || (finalBalance !== null && finalBalance > stats.lastBalance)) {
-      shouldNotify = true;
-    }
     if (finalBalance !== null) {
+      if (stats.lastBalance === null || finalBalance > stats.lastBalance) {
+        shouldNotify = true;
+      }
       stats.lastBalance = finalBalance;
     }
+    // 如果 finalBalance === null，shouldNotify 保持 false，不弹窗，也不更新 lastBalance
 
     store.dailyStats[acc.id] = stats;
     saveStore(store);
@@ -336,9 +350,10 @@ async function runAccount(acc, store, forceNotify, notifyOnError) {
     }
 
   } catch (err) {
-    // 出错时先保存状态，防止下次误判为首次运行
+    // 最终兜底：确保有状态记录（但不使用虚假值）
     if (stats && stats.initialBalance !== null && stats.lastBalance === null) {
-      stats.lastBalance = stats.initialBalance;
+      // 注意：这里不强制更新 lastBalance，以免影响后续判断
+      // 仅保存现有状态
     }
     store.dailyStats[acc.id] = stats;
     saveStore(store);
@@ -351,7 +366,7 @@ async function runAccount(acc, store, forceNotify, notifyOnError) {
         notify(acc.alias || acc.id, '初始金币: -- ; 最新金币: --\n今日签到: -- 次   ; 今日观看: -- 条\n异常: ' + errMsg);
       }
     }
-    throw err; // 抛出错误，让上层处理重试
+    throw err;
   }
 }
 
@@ -426,18 +441,13 @@ if (typeof $request !== 'undefined' && $request) {
             var shouldNotifyOnError = (retryCount === 4);
             await runAccount(currentAccount, store, isManual, shouldNotifyOnError);
             success = true;
-            // 成功则跳出内层循环，继续下一个账号
           } catch (err) {
             var errMsg = (err && err.error) ? err.error : String(err);
             var isTimeout = errMsg.toLowerCase().indexOf('timeout') !== -1;
             if (isTimeout && retryCount < 4) {
-              // 是 timeout 且还有重试次数，静默重试
               retryCount++;
-              // 继续内层循环
             } else {
-              // 不是 timeout 或重试次数已耗尽
-              // 如果是第 5 次重试，runAccount 内部已经弹窗了
-              success = true; // 标记为“已完成”，跳过当前账号
+              success = true; // 跳过当前账号
             }
           }
         }
