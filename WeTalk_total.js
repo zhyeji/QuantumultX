@@ -1,8 +1,8 @@
 /*
-@Name：WeTalk 自动化签到+视频奖励
-@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容最终版)
-       定时运行：金币有增长才弹窗，无增长不弹，异常时弹窗
+@Name：WeTalk 自动化签到+视频奖励 (整合版)
+@Desc：集成手动执行检测与超时重试机制
        手动运行：只查余额，不签到不领视频，始终弹窗
+       定时运行：签到+视频，遇超时静默重试最多5次，仍失败则弹窗
 [rewrite_local]
 ^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus url script-request-header https://raw.githubusercontent.com/zhyeji/QuantumultX/main/WeTalk_1.js
 [task_local]
@@ -16,12 +16,12 @@ var storeKey = 'wetalk_accounts_v1';
 var SECRET = '0fOiukQq7jXZV2GRi9LGlO';
 var API_HOST = 'api.wetalkapp.com';
 var MAX_VIDEO = 5;
-var VIDEO_DELAY = 3000; // 核心优化：从8000改为3000，缩短总耗时
+var VIDEO_DELAY = 8000;
 var ACCOUNT_GAP = 3500;
 
 // ==================== 手动/定时通知开关 ====================
 // false = 定时模式（有增长才通知）  true = 手动模式（始终通知，只查不操作）
-var FORCE_NOTIFY = false; // 自动模式
+var FORCE_NOTIFY = false;
 
 var IOS_VERSIONS = ['17.5.1','17.6.1','17.4.1','17.2.1','16.7.8','17.6','17.3.1','18.0.1','17.1.2','16.6.1'];
 var IOS_SCALES = ['2.00','3.00','3.00','2.00','3.00'];
@@ -275,7 +275,7 @@ function sleep(ms) {
 }
 
 // ==================== 单账号执行（核心，内部直接弹通知） ====================
-function runAccount(acc, store, forceNotify) {
+function runAccount(acc, store, forceNotify, notifyOnError) {
   function padRight(str, len) {
     str = String(str);
     while (str.length < len) str += ' ';
@@ -293,15 +293,12 @@ function runAccount(acc, store, forceNotify) {
   var ua = buildUA(acc.baseUA, acc.uaSeed);
   var headers = buildHeaders(acc.capture, ua);
 
-  // 调试通知
-  notify("调试-runAccount入口", "forceNotify=" + forceNotify + "\n账号 ID=" + acc.id);
-
   function fetchApi(path) {
     return $task.fetch({
       url: buildUrl(path, acc.capture),
       method: 'GET',
       headers: headers,
-      timeout: 15000  // 关键优化：增加超时设置
+      timeout: 15000 // 增加超时设置，防止卡死
     });
   }
 
@@ -330,28 +327,19 @@ function runAccount(acc, store, forceNotify) {
     var d = parseBody(res);
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
       stats.initialBalance = Number(d.result.balance);
-      notify("调试-第 1 次查询完成", "initialBalance=" + stats.initialBalance + "\nforceNotify=" + forceNotify);
-    } else {
-      notify("调试-第 1 次查询失败", "balance 未获取到");
     }
 
     if (forceNotify) {
       // 手动模式：只查余额，不签到不视频
-      notify("调试-进入手动分支", "即将第 2 次查询余额");
       return fetchApi('queryBalanceAndBonus').then(function(res2) {
         var finalBalance = null;
         var d2 = parseBody(res2);
         if (d2 && d2.retcode === 0 && d2.result && d2.result.balance !== undefined) {
           finalBalance = Number(d2.result.balance);
-          notify("调试-第 2 次查询成功", "status=200\nbody 前200=" + JSON.stringify(d2).slice(0, 200) + "...");
-          notify("调试-解析成功", "finalBalance=" + finalBalance);
-        } else {
-          notify("调试-第 2 次查询失败", "无法解析余额");
         }
         formatAndNotify(finalBalance);
         store.dailyStats[acc.id] = stats;
         saveStore(store);
-        return;
       }).catch(function(err) {
         formatAndNotify(null);
         store.dailyStats[acc.id] = stats;
@@ -361,10 +349,9 @@ function runAccount(acc, store, forceNotify) {
     }
 
     // 自动模式：开始签到
-    notify("调试-进入自动分支", "开始签到");
     return fetchApi('checkIn');
   }).then(function(res) {
-    if (forceNotify) return; // 手动模式跳过
+    if (forceNotify) return;
 
     var d = parseBody(res);
     if (d && d.retcode === 0) {
@@ -373,27 +360,18 @@ function runAccount(acc, store, forceNotify) {
       var isNewCheckIn = msg.indexOf('已经签过') === -1 && msg.indexOf('明天再试') === -1;
       if (hasReward || isNewCheckIn) {
         stats.checkInCount++;
-        notify("调试-签到成功", "今日已签到 " + stats.checkInCount + " 次");
-      } else {
-        notify("调试-签到跳过", "可能已签到或异常");
       }
-    } else {
-      // 关键修改：显示详细错误信息
-      var errorMsg = d && d.retmsg ? d.retmsg : (res && res.status ? "HTTP " + res.status : "未知错误");
-      notify("调试-签到异常", "retcode != 0, retmsg=" + errorMsg);
     }
 
     // 视频任务链
     var p = Promise.resolve();
     var videoLimitReached = false;
-    var videoCountSuccess = 0;
     for (var i = 0; i < MAX_VIDEO; i++) {
       (function(idx) {
         p = p.then(function() {
           if (videoLimitReached) return;
           return new Promise(function(resolve) {
             setTimeout(function() {
-              notify("调试-视频请求", "即将发送第 " + (idx+1) + " 个视频请求");
               resolve(fetchApi('videoBonus').then(function(res) {
                 var d = parseBody(res);
                 if (d && d.retcode === 0) {
@@ -402,17 +380,11 @@ function runAccount(acc, store, forceNotify) {
                   var notLimited = msg.indexOf('次数过多') === -1 && msg.indexOf('明天再试') === -1;
                   if (hasBonus && notLimited) {
                     stats.videoCount++;
-                    videoCountSuccess++;
-                    notify("调试-视频成功", "第 " + (idx+1) + " 个视频成功，当前总计: " + stats.videoCount);
                   } else {
                     videoLimitReached = true;
-                    notify("调试-视频上限", "第 " + (idx+1) + " 个视频已达上限，停止");
                   }
                 } else {
                   videoLimitReached = true;
-                  // 关键修改：显示详细错误信息
-                  var errorMsg = d && d.retmsg ? d.retmsg : (res && res.status ? "HTTP " + res.status : "未知错误");
-                  notify("调试-视频错误", "第 " + (idx+1) + " 个视频请求失败\n错误: " + errorMsg);
                 }
               }));
             }, idx === 0 ? 1500 : VIDEO_DELAY);
@@ -446,10 +418,7 @@ function runAccount(acc, store, forceNotify) {
     saveStore(store);
 
     if (shouldNotify) {
-      notify("调试-即将返回结果", "result前100字符=" + ("初始金币: " + (stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--') + " ; 最新金币: " + (finalBalance !== null ? finalBalance.toFixed(3) : '--') + " 今日签到: " + stats.checkInCount + " 次 ; 今日观看: " + stats.videoCount + " 条").slice(0, 100));
       formatAndNotify(finalBalance);
-    } else {
-      notify("调试-无增长", "金币未增长，不弹窗");
     }
   }).catch(function(err) {
     if (forceNotify) {
@@ -458,7 +427,13 @@ function runAccount(acc, store, forceNotify) {
       saveStore(store);
     } else {
       var errMsg = (err && err.error) ? err.error : String(err);
-      notify(acc.alias || acc.id, '初始金币: -- ; 最新金币: --\n今日签到: -- 次   ; 今日观看: -- 条\n异常: ' + errMsg);
+      // 根据 notifyOnError 决定是否弹窗
+      if (notifyOnError) {
+        notify(acc.alias || acc.id, '初始金币: -- ; 最新金币: --\n今日签到: -- 次   ; 今日观看: -- 条\n异常: ' + errMsg);
+      }
+      store.dailyStats[acc.id] = stats;
+      saveStore(store);
+      throw err;
     }
   });
 }
@@ -511,27 +486,48 @@ if (typeof $request !== 'undefined' && $request) {
     notify('未抓到任何账号', '请先打开 WeTalk 触发抓包');
     $done();
   } else {
-    var isManual = FORCE_NOTIFY;
+    // ===== 新增：检测是否为手动执行 =====
+    var isManualExecution = true;
+    if (typeof $environment !== 'undefined' && $environment === 'task') {
+      isManualExecution = false;
+    }
+    // 如果是手动执行，强制设定为手动模式，确保只查余额
+    var isManual = FORCE_NOTIFY || isManualExecution;
+    // ===== 结束新增 =====
+
     var idx = 0;
 
-    function runNext() {
-      if (idx >= ids.length) {
-        notify("调试-主流程结束", "所有账号执行完毕");
+    function runNext(accountIndex, retryCount) {
+      if (accountIndex >= ids.length) {
         $done();
         return;
       }
-      runAccount(store.accounts[ids[idx]], store, isManual).then(function() {
-        idx++;
-        if (idx < ids.length) {
-          sleep(ACCOUNT_GAP).then(runNext);
-        } else {
-          runNext();
-        }
+
+      var currentAccount = store.accounts[ids[accountIndex]];
+      // 判断：如果是第 5 次重试，则允许弹窗通知，否则静默
+      var shouldNotifyOnError = (retryCount >= 5);
+
+      runAccount(currentAccount, store, isManual, shouldNotifyOnError).then(function() {
+        // 当前账号执行成功，进入下一个账号
+        accountIndex++;
+        runNext(accountIndex, 0);
       }).catch(function(err) {
-        notify("调试-主流程错误", "执行出错: " + String(err));
-        $done();
+        var errMsg = (err && err.error) ? err.error : String(err);
+        // 判断是否是 timeout 类型错误
+        var isTimeout = errMsg.toLowerCase().indexOf('timeout') !== -1;
+
+        if (isTimeout && retryCount < 5) {
+          // 是 timeout 且重试次数未耗尽，静默重试当前账号
+          runNext(accountIndex, retryCount + 1);
+        } else {
+          // 不是 timeout 错误，或者重试次数已耗尽
+          // 注意：如果是第 5 次重试，runAccount 内部已经弹窗了，这里直接跳到下一个账号
+          accountIndex++;
+          runNext(accountIndex, 0);
+        }
       });
     }
-    runNext();
+
+    runNext(0, 0);
   }
 }
