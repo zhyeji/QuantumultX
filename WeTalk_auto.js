@@ -16,7 +16,7 @@ var storeKey = 'wetalk_accounts_v1';
 var SECRET = '0fOiukQq7jXZV2GRi9LGlO';
 var API_HOST = 'api.wetalkapp.com';
 var MAX_VIDEO = 5;
-var VIDEO_DELAY = 8000;
+var VIDEO_DELAY = 3000;
 var ACCOUNT_GAP = 3500;
 
 // ==================== 手动/定时通知开关 ====================
