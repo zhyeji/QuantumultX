@@ -1,6 +1,6 @@
 /*
-@Name：WeTalk 自动化签到+视频奖励 (调试版)
-@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容)
+@Name：WeTalk 自动化签到+视频奖励
+@Desc：自动签到+领视频奖励，累计当日数据，格式化输出 (ES5 兼容最终版)
        定时运行：金币有增长才弹窗，无增长不弹，异常时弹窗
        手动运行：只查余额，不签到不领视频，始终弹窗
 [rewrite_local]
@@ -16,12 +16,12 @@ var storeKey = 'wetalk_accounts_v1';
 var SECRET = '0fOiukQq7jXZV2GRi9LGlO';
 var API_HOST = 'api.wetalkapp.com';
 var MAX_VIDEO = 5;
-var VIDEO_DELAY = 8000;
+var VIDEO_DELAY = 3000; // 核心优化：从8000改为3000，缩短总耗时
 var ACCOUNT_GAP = 3500;
 
 // ==================== 手动/定时通知开关 ====================
 // false = 定时模式（有增长才通知）  true = 手动模式（始终通知，只查不操作）
-var FORCE_NOTIFY = false;
+var FORCE_NOTIFY = false; // 自动模式
 
 var IOS_VERSIONS = ['17.5.1','17.6.1','17.4.1','17.2.1','16.7.8','17.6','17.3.1','18.0.1','17.1.2','16.6.1'];
 var IOS_SCALES = ['2.00','3.00','3.00','2.00','3.00'];
@@ -274,17 +274,13 @@ function sleep(ms) {
   return new Promise(function(r) { setTimeout(r, ms); });
 }
 
-// ==================== 单账号执行（核心，含手动模式调试） ====================
+// ==================== 单账号执行（核心，内部直接弹通知） ====================
 function runAccount(acc, store, forceNotify) {
-  // 补空格函数
   function padRight(str, len) {
     str = String(str);
     while (str.length < len) str += ' ';
     return str;
   }
-
-  // ★ 调试：runAccount 入口
-  notify('调试-runAccount入口', 'forceNotify=' + forceNotify + '\n账号ID=' + acc.id);
 
   var now = new Date();
   var today = now.getFullYear() + '/' + (now.getMonth() + 1) + '/' + now.getDate();
@@ -297,8 +293,16 @@ function runAccount(acc, store, forceNotify) {
   var ua = buildUA(acc.baseUA, acc.uaSeed);
   var headers = buildHeaders(acc.capture, ua);
 
+  // 调试通知
+  notify("调试-runAccount入口", "forceNotify=" + forceNotify + "\n账号 ID=" + acc.id);
+
   function fetchApi(path) {
-    return $task.fetch({ url: buildUrl(path, acc.capture), method: 'GET', headers: headers });
+    return $task.fetch({
+      url: buildUrl(path, acc.capture),
+      method: 'GET',
+      headers: headers,
+      timeout: 15000  // 关键优化：增加超时设置
+    });
   }
 
   function parseBody(res) {
@@ -309,8 +313,7 @@ function runAccount(acc, store, forceNotify) {
     }
   }
 
-  // 组装格式化输出
-  function formatResult(finalBalance) {
+  function formatAndNotify(finalBalance) {
     var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
     var fin = finalBalance !== null ? finalBalance.toFixed(3) : '--';
     var leftCoin = '初始金币: ' + ini + ' ';
@@ -320,44 +323,49 @@ function runAccount(acc, store, forceNotify) {
     leftSign = padRight(leftSign, maxLen);
     var line1 = leftCoin + '; 最新金币: ' + fin;
     var line2 = leftSign + '; 今日观看: ' + stats.videoCount + ' 条';
-    return line1 + '\n' + line2;
+    notify(acc.alias || acc.id, line1 + '\n' + line2);
   }
 
-  // 1. 查初始余额
   return fetchApi('queryBalanceAndBonus').then(function(res) {
     var d = parseBody(res);
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
       stats.initialBalance = Number(d.result.balance);
+      notify("调试-第 1 次查询完成", "initialBalance=" + stats.initialBalance + "\nforceNotify=" + forceNotify);
+    } else {
+      notify("调试-第 1 次查询失败", "balance 未获取到");
     }
 
-    notify('调试-第1次查询完成', 'initialBalance=' + stats.initialBalance + '\nforceNotify=' + forceNotify);
-
-    // ★ 手动模式：只查余额，不签到、不领视频，始终返回结果
     if (forceNotify) {
-      notify('调试-进入手动分支', '即将第2次查询余额');
+      // 手动模式：只查余额，不签到不视频
+      notify("调试-进入手动分支", "即将第 2 次查询余额");
       return fetchApi('queryBalanceAndBonus').then(function(res2) {
-        notify('调试-第2次查询成功', 'status=' + res2.statusCode + '\nbody前200=' + (res2.body || '').substring(0, 200));
         var finalBalance = null;
         var d2 = parseBody(res2);
         if (d2 && d2.retcode === 0 && d2.result && d2.result.balance !== undefined) {
           finalBalance = Number(d2.result.balance);
-          notify('调试-解析成功', 'finalBalance=' + finalBalance);
+          notify("调试-第 2 次查询成功", "status=200\nbody 前200=" + JSON.stringify(d2).slice(0, 200) + "...");
+          notify("调试-解析成功", "finalBalance=" + finalBalance);
         } else {
-          notify('调试-解析失败', 'retcode=' + (d2 ? d2.retcode : 'null'));
+          notify("调试-第 2 次查询失败", "无法解析余额");
         }
-        var result = formatResult(finalBalance);
-        notify('调试-即将返回结果', 'result前100字符=' + result.substring(0, 100));
-        return result;
-      }).catch(function(e) {
-        notify('调试-手动请求失败', '错误=' + (e.error || JSON.stringify(e)));
-        return formatResult(null);
+        formatAndNotify(finalBalance);
+        store.dailyStats[acc.id] = stats;
+        saveStore(store);
+        return;
+      }).catch(function(err) {
+        formatAndNotify(null);
+        store.dailyStats[acc.id] = stats;
+        saveStore(store);
+        throw err;
       });
     }
 
-    // ★ 定时模式：继续签到和视频奖励
+    // 自动模式：开始签到
+    notify("调试-进入自动分支", "开始签到");
     return fetchApi('checkIn');
   }).then(function(res) {
-    // 手动模式下这里不会执行（上面已经 return 了）
+    if (forceNotify) return; // 手动模式跳过
+
     var d = parseBody(res);
     if (d && d.retcode === 0) {
       var hasReward = d.result && (d.result.bonus !== undefined || d.result.bonusHint !== undefined);
@@ -365,17 +373,25 @@ function runAccount(acc, store, forceNotify) {
       var isNewCheckIn = msg.indexOf('已经签过') === -1 && msg.indexOf('明天再试') === -1;
       if (hasReward || isNewCheckIn) {
         stats.checkInCount++;
+        notify("调试-签到成功", "今日已签到 " + stats.checkInCount + " 次");
+      } else {
+        notify("调试-签到跳过", "可能已签到或异常");
       }
+    } else {
+      notify("调试-签到异常", "retcode != 0");
     }
-    // 2. 领视频奖励（遇到上限立即停止）
+
+    // 视频任务链
     var p = Promise.resolve();
     var videoLimitReached = false;
+    var videoCountSuccess = 0;
     for (var i = 0; i < MAX_VIDEO; i++) {
       (function(idx) {
         p = p.then(function() {
           if (videoLimitReached) return;
           return new Promise(function(resolve) {
             setTimeout(function() {
+              notify("调试-视频请求", "即将发送第 " + (idx+1) + " 个视频请求");
               resolve(fetchApi('videoBonus').then(function(res) {
                 var d = parseBody(res);
                 if (d && d.retcode === 0) {
@@ -384,11 +400,15 @@ function runAccount(acc, store, forceNotify) {
                   var notLimited = msg.indexOf('次数过多') === -1 && msg.indexOf('明天再试') === -1;
                   if (hasBonus && notLimited) {
                     stats.videoCount++;
+                    videoCountSuccess++;
+                    notify("调试-视频成功", "第 " + (idx+1) + " 个视频成功，当前总计: " + stats.videoCount);
                   } else {
                     videoLimitReached = true;
+                    notify("调试-视频上限", "第 " + (idx+1) + " 个视频已达上限，停止");
                   }
                 } else {
                   videoLimitReached = true;
+                  notify("调试-视频错误", "第 " + (idx+1) + " 个视频请求失败");
                 }
               }));
             }, idx === 0 ? 1500 : VIDEO_DELAY);
@@ -398,22 +418,22 @@ function runAccount(acc, store, forceNotify) {
     }
     return p;
   }).then(function() {
-    // 手动模式下这里不会执行
+    if (forceNotify) return;
+
     return fetchApi('queryBalanceAndBonus');
   }).then(function(res) {
-    // 手动模式下这里不会执行
+    if (forceNotify) return;
+
     var finalBalance = null;
     var d = parseBody(res);
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
       finalBalance = Number(d.result.balance);
     }
 
-    // 判断是否通知（仅定时模式进入）
     var shouldNotify = false;
     if (stats.lastBalance === null || (finalBalance !== null && finalBalance > stats.lastBalance)) {
       shouldNotify = true;
     }
-    // 更新 lastBalance：仅在定时模式有增长时更新
     if (finalBalance !== null && (stats.lastBalance === null || finalBalance > stats.lastBalance)) {
       stats.lastBalance = finalBalance;
     }
@@ -422,22 +442,26 @@ function runAccount(acc, store, forceNotify) {
     saveStore(store);
 
     if (shouldNotify) {
-      return formatResult(finalBalance);
+      notify("调试-即将返回结果", "result前100字符=" + ("初始金币: " + (stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--') + " ; 最新金币: " + (finalBalance !== null ? finalBalance.toFixed(3) : '--') + " 今日签到: " + stats.checkInCount + " 次 ; 今日观看: " + stats.videoCount + " 条").slice(0, 100));
+      formatAndNotify(finalBalance);
+    } else {
+      notify("调试-无增长", "金币未增长，不弹窗");
     }
-    return '';
   }).catch(function(err) {
     if (forceNotify) {
-      return formatResult(null);
+      formatAndNotify(null);
+      store.dailyStats[acc.id] = stats;
+      saveStore(store);
+    } else {
+      var errMsg = (err && err.error) ? err.error : String(err);
+      notify(acc.alias || acc.id, '初始金币: -- ; 最新金币: --\n今日签到: -- 次   ; 今日观看: -- 条\n异常: ' + errMsg);
     }
-    // 定时模式异常也弹出
-    var errMsg = (err && err.error) ? err.error : String(err);
-    return formatResult(null) + '\n异常: ' + errMsg;
   });
 }
 
 // ==================== 主流程 ====================
 if (typeof $request !== 'undefined' && $request) {
-  // 抓包模式
+  // 抓包捕获账号信息
   var paramsRaw = parseRawQuery($request.url);
   var headersMap = normalizeHeaderNameMap($request.headers || {});
   var baseUA = '';
@@ -471,7 +495,7 @@ if (typeof $request !== 'undefined' && $request) {
   }
   $done({});
 } else {
-  // 定时任务 / 手动运行模式
+  // 定时任务执行
   var store = loadStore();
   var ids = [];
   var order = store.order;
@@ -483,38 +507,27 @@ if (typeof $request !== 'undefined' && $request) {
     notify('未抓到任何账号', '请先打开 WeTalk 触发抓包');
     $done();
   } else {
-    var total = ids.length;
-    var results = [];
     var isManual = FORCE_NOTIFY;
-    notify('调试-主流程', 'isManual=' + isManual + '\n账号总数=' + total);
-    var chain = Promise.resolve();
-    for (var idx = 0; idx < ids.length; idx++) {
-  (function(index) {
-    chain = chain.then(function() {
-      return runAccount(store.accounts[ids[index]], store, isManual).then(function(text) {
-        notify('调试-runAccount返回', '内容长度=' + text.length + '\n内容前200字符=' + text.substring(0, 200));
-        results.push(text);
-        if (index < ids.length - 1) {
-          return sleep(ACCOUNT_GAP);
+    var idx = 0;
+
+    function runNext() {
+      if (idx >= ids.length) {
+        notify("调试-主流程结束", "所有账号执行完毕");
+        $done();
+        return;
+      }
+      runAccount(store.accounts[ids[idx]], store, isManual).then(function() {
+        idx++;
+        if (idx < ids.length) {
+          sleep(ACCOUNT_GAP).then(runNext);
+        } else {
+          runNext();
         }
-        return text;
+      }).catch(function(err) {
+        notify("调试-主流程错误", "执行出错: " + String(err));
+        $done();
       });
-    });
-  })(idx);
-}
-    chain.then(function() {
-      var validResults = [];
-      for (var r = 0; r < results.length; r++) {
-        if (results[r] !== '') validResults.push(results[r]);
-      }
-      notify('调试-最终过滤', '有效结果数=' + validResults.length);
-      if (validResults.length > 0) {
-        notify('全部完成 (' + total + '个账号)', validResults.join('\n———\n'));
-      }
-      $done();
-    }).catch(function(err) {
-      notify('执行异常 (' + total + '个账号)', (results.join('\n———\n')) + '\n' + (err.error || String(err)));
-      $done();
-    });
+    }
+    runNext();
   }
 }
