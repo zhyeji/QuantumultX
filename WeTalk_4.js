@@ -11,6 +11,8 @@
 hostname = api.wetalkapp.com
 */
 
+console.log('✅ WeTalk 脚本已成功加载并开始执行');
+
 var scriptName = 'WeTalk';
 var storeKey = 'wetalk_accounts_v1';
 var SECRET = '0fOiukQq7jXZV2GRi9LGlO';
@@ -20,8 +22,7 @@ var VIDEO_DELAY = 8000;
 var ACCOUNT_GAP = 3500;
 
 // ==================== 手动/定时通知开关 ====================
-// false = 定时模式（有增长才通知）  true = 手动模式（始终通知，只查不操作）
-var FORCE_NOTIFY = false;
+var FORCE_NOTIFY = true; // true = 手动模式（只查不操作+始终通知）
 
 var IOS_VERSIONS = ['17.5.1','17.6.1','17.4.1','17.2.1','16.7.8','17.6','17.3.1','18.0.1','17.1.2','16.6.1'];
 var IOS_SCALES = ['2.00','3.00','3.00','2.00','3.00'];
@@ -267,6 +268,7 @@ function buildHeaders(capture, ua) {
 
 // ==================== 通知等 ====================
 function notify(title, body) {
+  console.log('🔔 发送通知: ' + title + ' - ' + body);
   $notify(scriptName, title, body);
 }
 
@@ -276,6 +278,8 @@ function sleep(ms) {
 
 // ==================== 单账号执行（核心，内部直接弹通知） ====================
 function runAccount(acc, store, forceNotify) {
+  console.log('▶️ 开始处理账号: ' + (acc.alias || acc.id) + ' (forceNotify=' + forceNotify + ')');
+
   function padRight(str, len) {
     str = String(str);
     while (str.length < len) str += ' ';
@@ -305,17 +309,6 @@ function runAccount(acc, store, forceNotify) {
     }
   }
 
-if (forceNotify) {
-      console.log('🔔 手动模式：准备弹通知');
-      return fetchApi('queryBalanceAndBonus').then(function(res2) {
-        console.log('🔔 手动模式：查询完成，开始弹通知');
-        ...
-      }).catch(function() {
-        console.log('🔔 手动模式：查询失败，仍然弹通知');
-        ...
-      });
-    }
-    
   function formatAndNotify(finalBalance) {
     var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
     var fin = finalBalance !== null ? finalBalance.toFixed(3) : '--';
@@ -330,13 +323,16 @@ if (forceNotify) {
   }
 
   return fetchApi('queryBalanceAndBonus').then(function(res) {
+    console.log('📊 第一次查询余额完成');
     var d = parseBody(res);
     if (d && d.retcode === 0 && d.result && d.result.balance !== undefined) {
       stats.initialBalance = Number(d.result.balance);
     }
 
     if (forceNotify) {
+      console.log('🔔 手动模式：准备直接弹通知（不签到不视频）');
       return fetchApi('queryBalanceAndBonus').then(function(res2) {
+        console.log('📊 第二次查询余额完成');
         var finalBalance = null;
         var d2 = parseBody(res2);
         if (d2 && d2.retcode === 0 && d2.result && d2.result.balance !== undefined) {
@@ -345,13 +341,15 @@ if (forceNotify) {
         formatAndNotify(finalBalance);
         store.dailyStats[acc.id] = stats;
         saveStore(store);
-      }).catch(function() {
+      }).catch(function(e) {
+        console.log('❌ 手动模式查询失败: ' + (e && e.message || e));
         formatAndNotify(null);
         store.dailyStats[acc.id] = stats;
         saveStore(store);
       });
     }
 
+    console.log('⏰ 定时模式：继续签到流程');
     return fetchApi('checkIn');
   }).then(function(res) {
     var d = parseBody(res);
@@ -428,7 +426,10 @@ if (forceNotify) {
 }
 
 // ==================== 主流程 ====================
+console.log('📍 脚本运行环境: typeof $request = ' + typeof $request + ', $request 存在 = ' + !!$request);
+
 if (typeof $request !== 'undefined' && $request) {
+  console.log('📥 进入抓包分支');
   // ------- 抓包阶段 -------
   var paramsRaw = parseRawQuery($request.url);
   var headersMap = normalizeHeaderNameMap($request.headers || {});
@@ -464,6 +465,7 @@ if (typeof $request !== 'undefined' && $request) {
   $done({});
 
 } else {
+  console.log('🚀 进入定时/手动分支');
   // ------- 定时 / 手动执行阶段 -------
   var store = loadStore();
   var ids = [];
@@ -472,26 +474,32 @@ if (typeof $request !== 'undefined' && $request) {
     var id = order[i];
     if (store.accounts[id]) ids.push(id);
   }
+  console.log('📋 当前账号数量: ' + ids.length);
   if (!ids.length) {
+    console.log('⚠️ 账号列表为空，准备通知并退出');
     notify('未抓到任何账号', '请先打开 WeTalk 触发抓包');
     $done();
   } else {
     var isManual = FORCE_NOTIFY;
+    console.log('⚙️ 运行模式: ' + (isManual ? '手动' : '定时'));
     var idx = 0;
 
     function runNext() {
       if (idx >= ids.length) {
+        console.log('🏁 所有账号处理完毕');
         $done();
         return;
       }
       runAccount(store.accounts[ids[idx]], store, isManual).then(function() {
         idx++;
         if (idx < ids.length) {
+          console.log('⏳ 等待 ' + ACCOUNT_GAP + 'ms 后处理下一个账号');
           sleep(ACCOUNT_GAP).then(runNext);
         } else {
           runNext();
         }
-      }).catch(function() {
+      }).catch(function(e) {
+        console.log('❌ 账号处理异常: ' + (e && e.message || e));
         $done();
       });
     }
@@ -554,15 +562,21 @@ if (typeof $request !== 'undefined' && $request) {
       return attempt(1);
     };
 
-    // 主流程：先检测连接，再根据结果决定行为（满足规范要求的独立模块+返回值通信）
-    checkConnectivity().then(function(reachable) {
-      if (reachable) {
-        console.log('✅ WeTalk 连接检测通过，开始执行签到任务');
-      } else {
-        console.log('⚠️ WeTalk 连接检测未通过，但按策略继续执行签到任务（可能失败）');
-      }
-      // 不论检测结果如何，都继续执行签到（第5轮策略）
+    // 主流程：手动运行直接执行，定时运行先检测连接
+    if (isManual) {
+      console.log('🔔 手动模式：跳过连接检测，直接执行');
       runNext();
-    });
+    } else {
+      console.log('⏰ 定时模式：开始连接检测');
+      checkConnectivity().then(function(reachable) {
+        if (reachable) {
+          console.log('✅ WeTalk 连接检测通过，开始执行签到任务');
+        } else {
+          console.log('⚠️ WeTalk 连接检测未通过，但按策略继续执行签到任务（可能失败）');
+        }
+        runNext();
+      });
+    }
   }
 }
+console.log('🏁 脚本初始化完毕');
