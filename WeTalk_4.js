@@ -305,6 +305,17 @@ function runAccount(acc, store, forceNotify) {
     }
   }
 
+if (forceNotify) {
+      console.log('🔔 手动模式：准备弹通知');
+      return fetchApi('queryBalanceAndBonus').then(function(res2) {
+        console.log('🔔 手动模式：查询完成，开始弹通知');
+        ...
+      }).catch(function() {
+        console.log('🔔 手动模式：查询失败，仍然弹通知');
+        ...
+      });
+    }
+    
   function formatAndNotify(finalBalance) {
     var ini = stats.initialBalance !== null ? stats.initialBalance.toFixed(3) : '--';
     var fin = finalBalance !== null ? finalBalance.toFixed(3) : '--';
